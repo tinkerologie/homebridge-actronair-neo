@@ -41,7 +41,7 @@ jobs:
 
   release:
     needs: test
-    if: github.repository == 'ruaan-deysel/homebridge-actronair-neo'
+    if: github.repository == 'tinkerologie/homebridge-actronair-neo'
     runs-on: ubuntu-latest
     # Must match the environment configured on npm's trusted publisher, or the OIDC claim will
     # not match and npm refuses the publish.

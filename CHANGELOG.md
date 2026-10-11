@@ -242,8 +242,8 @@ First release of **homebridge-actronair-neo**.
   plugin settings page; there is no username or password setting, and nothing to configure by
   hand.
 
-[1.2.1]: https://github.com/ruaan-deysel/homebridge-actronair-neo/releases/tag/v1.2.1
-[1.2.0]: https://github.com/ruaan-deysel/homebridge-actronair-neo/releases/tag/v1.2.0
-[1.1.0]: https://github.com/ruaan-deysel/homebridge-actronair-neo/releases/tag/v1.1.0
-[1.0.1]: https://github.com/ruaan-deysel/homebridge-actronair-neo/releases/tag/v1.0.1
-[1.0.0]: https://github.com/ruaan-deysel/homebridge-actronair-neo/releases/tag/v1.0.0
+[1.2.1]: https://github.com/tinkerologie/homebridge-actronair-neo/releases/tag/v1.2.1
+[1.2.0]: https://github.com/tinkerologie/homebridge-actronair-neo/releases/tag/v1.2.0
+[1.1.0]: https://github.com/tinkerologie/homebridge-actronair-neo/releases/tag/v1.1.0
+[1.0.1]: https://github.com/tinkerologie/homebridge-actronair-neo/releases/tag/v1.0.1
+[1.0.0]: https://github.com/tinkerologie/homebridge-actronair-neo/releases/tag/v1.0.0
