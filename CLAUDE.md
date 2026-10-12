@@ -29,7 +29,7 @@ Linting is flat-config ESLint (`eslint.config.js`, `@antfu/eslint-config`) — t
 ## Releasing
 
 `version` in `package.json` is the single source of truth — edit it by hand (or with
-`npm version`), update `CHANGELOG.md`, and push to `main`. `.github/workflows/publish.yml`
+`npm version`), update `CHANGELOG.md`, and push to `main`. `.github/workflows/release.yml`
 runs lint/test/build on Node 22.x and 24.x, then checks whether `v<version>` is already
 tagged: if not, it publishes to npm and creates the tag and GitHub release. If it is, the
 release steps skip, so ordinary commits are a no-op and re-running the workflow cannot

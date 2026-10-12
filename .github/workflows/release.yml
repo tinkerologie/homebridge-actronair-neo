@@ -1,36 +1,22 @@
-name: Test, Release & Publish
+name: Release
 
-# The version in package.json is the single source of truth. Bump it, push to main, and this
-# workflow tags, publishes and releases that version. Push anything else and it just runs the
-# tests — the release steps look for a version that has not been released yet and stop when
-# there isn't one, so ordinary commits cost nothing and re-runs are safe.
-#
-# Deliberately not an auto-bump on every push: that hands the decision of what ships to CI
-# rather than to whoever wrote the CHANGELOG, which is how a release intended as 1.0.0 goes
-# out as 1.0.1.
-#
-# This file's NAME is load-bearing: npm's trusted publisher is configured against
-# `publish.yml` specifically, and publishing from a differently-named workflow is rejected.
-# Pull requests are covered by pr.yml, so they are not triggered here as well.
 on:
   push:
     branches: [main]
 
-# Least privilege by default; the release job below widens this for itself, and only for
-# itself. Without a default block every job inherits the repository-wide scopes, which is how
-# a test job ends up holding write access it has no use for.
 permissions:
   contents: read
 
 jobs:
   test:
+    name: Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [22.x, 24.x]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -40,6 +26,7 @@ jobs:
       - run: npm run build
 
   release:
+    name: Release
     needs: test
     if: github.repository == 'tinkerologie/homebridge-actronair-neo'
     runs-on: ubuntu-latest
@@ -52,8 +39,8 @@ jobs:
       id-token: write
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22.x
           registry-url: https://registry.npmjs.org

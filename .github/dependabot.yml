@@ -1,3 +1,4 @@
+# Dependabot (tinkerologie standard: see STANDARDS.md in tinkerologie/.github)
 version: 2
 
 updates:
@@ -9,11 +10,11 @@ updates:
     schedule:
       interval: weekly
       day: monday
-      time: '09:00'
-      timezone: Australia/Sydney
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
     commit-message:
-      prefix: ci
+      prefix: chore(deps)
     groups:
       actions:
         patterns: ['*']
@@ -23,15 +24,11 @@ updates:
     schedule:
       interval: weekly
       day: monday
-      time: '09:00'
-      timezone: Australia/Sydney
     open-pull-requests-limit: 10
+    labels:
+      - dependencies
     commit-message:
-      prefix: deps
-      prefix-development: chore
-    # One PR per patch/minor bump across ~20 dev dependencies is noise nobody reads. Grouping
-    # keeps each week to a couple of PRs that CI can verify as a unit, while majors stay
-    # separate because they are the ones that actually need reading.
+      prefix: chore(deps)
     groups:
       dev-dependencies:
         dependency-type: development
