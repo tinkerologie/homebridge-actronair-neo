@@ -51,6 +51,10 @@ jobs:
           node-version: 22.x
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      # Does package.json name a version that has not been released yet? Everything below is
+      # skipped when it doesn't, so a normal commit to main is a no-op here rather than a
+      # failure, and re-running this workflow cannot double-publish.
       - name: Determine whether this version needs releasing
         id: check
         run: |
