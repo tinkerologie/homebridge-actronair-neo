@@ -110,6 +110,14 @@ jobs:
     needs: package
     if: needs.package.outputs.tagged == 'false'
     runs-on: ubuntu-latest
+    # One publish at a time: a racing run then finds this run's package on npm and
+    # skips (same tarball) or fails on the integrity check; it never publishes twice.
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
+      # Queue every pending release rather than only the newest (actionlint 1.7.12 does
+      # not know `queue` yet; GitHub accepts it).
+      queue: max
     # Must match the environment configured on npm's trusted publisher, or the OIDC claim will
     # not match and npm refuses the publish.
     environment: release
@@ -157,10 +165,22 @@ jobs:
           VERSION: ${{ needs.package.outputs.version }}
         run: |
           NAME="$(tar -xzOf ./release/*.tgz package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
-          STATUS="$(curl --silent --output /dev/null --write-out '%{http_code}' "https://registry.npmjs.org/$NAME/$VERSION")"
+          # One registry response gives both the status and, if published, the integrity.
+          METADATA="$RUNNER_TEMP/npm-metadata.json"
+          if ! STATUS="$(curl --silent --show-error --output "$METADATA" --write-out '%{http_code}' "https://registry.npmjs.org/$NAME/$VERSION")"; then
+            echo "::error::Could not reach the npm registry."
+            exit 1
+          fi
           case "$STATUS" in
             200)
-              echo "::notice::$NAME@$VERSION is already on npm; skipping the publish."
+              # Only skip if npm holds exactly this tarball; anything else is a conflict.
+              PUBLISHED="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).dist?.integrity ?? ""' "$METADATA")"
+              LOCAL="sha512-$(openssl dgst -sha512 -binary ./release/*.tgz | base64 -w0)"
+              if [ "$PUBLISHED" != "$LOCAL" ]; then
+                echo "::error::$NAME@$VERSION is on npm with different contents ($PUBLISHED) than this run's tarball ($LOCAL)."
+                exit 1
+              fi
+              echo "::notice::$NAME@$VERSION is already on npm with this exact tarball; skipping the publish."
               echo "publish=false" >> "$GITHUB_OUTPUT"
               ;;
             404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
