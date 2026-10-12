@@ -37,13 +37,13 @@ double-publish.
 
 Two things about that file that are easy to break:
 
-- **Its name is load-bearing.** npm's trusted publisher is bound to `publish.yml`; renaming it
+- **Its name is load-bearing.** npm's trusted publisher is bound to `release.yml`; renaming it
   makes publishing fail with an authentication error that says nothing about filenames.
 - **Publishing is credential-free**, via OIDC (`id-token: write` plus `environment: release`,
   which must match what npm has stored). There is no `NPM_TOKEN`, and adding one would not
   help — a mismatch in repo, workflow filename or environment is what breaks it.
 
-`pr.yml` runs the same test matrix for pull requests.
+`ci.yml` runs the same test matrix for pull requests.
 
 ## Architecture
 
