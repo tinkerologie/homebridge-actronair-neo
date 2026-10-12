@@ -29,7 +29,7 @@ Linting is flat-config ESLint (`eslint.config.js`, `@antfu/eslint-config`) — t
 ## Releasing
 
 `version` in `package.json` is the single source of truth — edit it by hand (or with
-`npm version`), update `CHANGELOG.md`, and push to `main`. `.github/workflows/publish.yml`
+`npm version`), update `CHANGELOG.md`, and push to `main`. `.github/workflows/release.yml`
 runs lint/test/build on Node 22.x and 24.x, then checks whether `v<version>` is already
 tagged: if not, it publishes to npm and creates the tag and GitHub release. If it is, the
 release steps skip, so ordinary commits are a no-op and re-running the workflow cannot
@@ -37,13 +37,13 @@ double-publish.
 
 Two things about that file that are easy to break:
 
-- **Its name is load-bearing.** npm's trusted publisher is bound to `publish.yml`; renaming it
+- **Its name is load-bearing.** npm's trusted publisher is bound to `release.yml`; renaming it
   makes publishing fail with an authentication error that says nothing about filenames.
 - **Publishing is credential-free**, via OIDC (`id-token: write` plus `environment: release`,
   which must match what npm has stored). There is no `NPM_TOKEN`, and adding one would not
   help — a mismatch in repo, workflow filename or environment is what breaks it.
 
-`pr.yml` runs the same test matrix for pull requests.
+`ci.yml` runs the same test matrix for pull requests.
 
 ## Architecture
 
