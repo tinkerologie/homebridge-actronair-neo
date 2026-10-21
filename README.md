@@ -1,9 +1,11 @@
 # Homebridge ActronAir Neo
 
+<!-- BADGES:START -->
 [![npm](https://img.shields.io/npm/v/homebridge-actronair-neo/latest?label=latest)](https://www.npmjs.com/package/homebridge-actronair-neo)
-[![GitHub release](https://img.shields.io/github/release/ruaan-deysel/homebridge-actronair-neo.svg)](https://github.com/tinkerologie/homebridge-actronair-neo/releases)
+[![GitHub release](https://img.shields.io/github/v/release/tinkerologie/homebridge-actronair-neo.svg)](https://github.com/tinkerologie/homebridge-actronair-neo/releases)
 [![npm](https://img.shields.io/npm/dt/homebridge-actronair-neo)](https://www.npmjs.com/package/homebridge-actronair-neo)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/github/license/tinkerologie/homebridge-actronair-neo)](./LICENSE)
+<!-- BADGES:END -->
 
 Control your ActronAir Neo air conditioning system with Apple HomeKit and Matter using Homebridge.
 
