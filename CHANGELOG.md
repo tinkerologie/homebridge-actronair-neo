@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-28
+
 ### Security
 
 - Development tooling only (not in the published package): an npm `override` moves `katex` to 0.18 (GHSA-238p-pmpm-9mq7, low). It reaches the lint setup through `@antfu/eslint-config` → `@eslint/markdown` → `micromark-extension-math`, whose latest release allows only `^0.16`.
@@ -18,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Lint and formatting checks now fail on any warning. Removed obsolete Aikido scanner instructions.
-
 - Pull requests get path labels and at most one type label, `bug` or `enhancement`, from the shared tinkerologie PR labeler. Dependabot pull requests whose largest update is a patch or minor version merge automatically once the checks and commit statuses on their head commit have finished without a failure (a Codecov check that is still pending is not waited for; a Codecov failure blocks); majors, and pull requests with open review threads, stay for review.
 - Releases are split into two jobs. After the Test job's lint and tests, a read-only Package job installs dependencies, builds and packs the tarball; a separate Publish job, the only one with write access and an npm OIDC identity, publishes that tarball with lifecycle scripts disabled and creates the GitHub release. Dependency install scripts and the project's own build and test code therefore never run with publishing credentials, and the Publish job installs nothing (it checks that Node 24's bundled npm supports trusted publishing instead of upgrading npm). The Publish job checks npm again before publishing: a re-run after a partial failure skips the publish when npm already has that run's exact tarball and still creates the release; publishing runs one at a time, so a racing run that finds a different package on npm fails instead of publishing twice; and the tarball is kept for 7 days for such re-runs.
 - Release workflows hardened (least-privilege job permissions, no expressions in shell scripts, no persisted checkout credentials, no dependency caches); scheduled workflows run on Australia/Brisbane time.
