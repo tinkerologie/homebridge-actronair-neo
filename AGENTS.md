@@ -9,7 +9,7 @@
 | **Name** | Homebridge ActronAir Neo Plugin |
 | **Repository** | `github.com/tinkerologie/homebridge-actronair-neo` |
 | **Default Branch** | `main` |
-| **Description** | Homebridge plugin exposing ActronAir Neo air conditioning systems to Apple HomeKit. |
+| **Description** | Homebridge plugin exposing ActronAir Neo air conditioning systems to Apple HomeKit and Matter. |
 
 ## Mandatory Development Workflow for AI Agents
 
@@ -32,7 +32,8 @@ All AI coding assistants (Claude Code, Gemini, GitHub Copilot, Cursor, Roo, Devi
 
 - `npm run build` — Compile TypeScript
 - `npm test` — Run unit tests
-- `npm run lint` — Check lint rules
+- `npm run lint` — Check lint and formatting rules with zero warnings
+- `npm run typecheck` — Type-check source without emitting JavaScript
 - `npm run test:coverage` — Run tests with coverage report
 
 More commands:
@@ -43,11 +44,13 @@ npm run test:watch      # vitest (watch mode)
 npx vitest run test/state.test.ts          # single file
 npx vitest run -t 'name of test'           # single test by name
 npm run watch            # build + npm link + nodemon (runs homebridge -I -D)
-npm run prepublishOnly   # lint && test && build (also runs on `npm publish`)
+npm run prepublishOnly   # lint && typecheck && test && build (also runs on `npm publish`)
 ```
 
-`npm run build` is `rimraf ./dist && tsc`, `npm test` is `vitest run`, `npm run lint` is `eslint .`, and
-`npm run test:coverage` writes to `coverage/`.
+`npm run build` is `rimraf ./dist && tsc`, `npm test` is `vitest run`, `npm run lint` is `eslint . --max-warnings=0`, `npm run typecheck` is `tsc --noEmit`, and
+`npm run test:coverage` writes text and LCOV reports to `coverage/`. Codecov compares project coverage
+against the base commit with zero tolerance for drops; enforcement requires a main baseline
+and the `codecov/project` check configured as required in the repository settings.
 
 Tests live in `test/`, not next to their source, and are named after the module they cover
 (`test/state.test.ts` tests `src/neo/state.ts`). Fixtures are in `test/fixtures/`: real
@@ -63,7 +66,7 @@ Linting is flat-config ESLint (`eslint.config.js`, `@antfu/eslint-config`) — t
 `version` in `package.json` is the single source of truth — edit it by hand (or with
 `npm version`), update `CHANGELOG.md`, and land it on `main` through the pull request workflow
 above. `.github/workflows/release.yml`
-runs lint/test/build on Node 22.x and 24.x, then checks whether `v<version>` is already
+runs lint/typecheck/test/build on Node 22.x, 24.x and 26.x, then checks whether `v<version>` is already
 tagged: if not, it publishes to npm and creates the tag and GitHub release. If it is, the
 release steps skip, so ordinary commits are a no-op and re-running the workflow cannot
 double-publish.
@@ -99,7 +102,8 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    its own Heater/Cooler + humidity + battery), `modeSwitch.ts` (`ModeSwitchAccessory`,
    shared by away/quiet/continuous-fan). All three read `platform.state` and write through
    `platform.commands`; none touch `NeoRest` directly.
-5. **`homebridge-ui/`** — the custom settings page. `server.js` runs the OAuth2 device-code
+5. **`src/matter/`** — Matter bindings, built only when the bridge enables Matter.
+6. **`homebridge-ui/`** — the custom settings page. `server.js` runs the OAuth2 device-code
    flow server-side (`/device-code`, `/poll-token`, `/session`, `/account`); `public/index.html`
    is the browser side that polls it and shows linked-account status.
 
@@ -114,7 +118,10 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    HomeKit characteristics whose backing path is in the changed set (or `'*'` on a full
    replace). Polling and pushing blindly on every tick causes spurious HomeKit
    "characteristic value ignored" warnings when nothing actually changed, which is why
-   updates are scoped to the paths that moved.
+   updates are scoped to the paths that moved. Each HAP wrapper owns its state unsubscribe
+   closure and exposes `dispose()`; the platform releases it after a replacement initializes, on removal,
+   and on shutdown. Discovery must recheck shutdown after awaits before creating resources
+   or registering accessories. Matter tracking is removed only after its API call succeeds.
 
 2. **`NeoState` (`src/neo/state.ts`) is the single authoritative tree.** Its change set reports
    **leaf paths, including when an optional subtree appears or disappears wholesale** — `diffPaths`

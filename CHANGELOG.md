@@ -13,7 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A current Homebridge development audit, explicit type checking, LCOV reports and Codecov project/patch checks. CI and release validation also test Node 26.
+
 ### Changed
+
+- Lint and formatting checks now fail on any warning. Removed obsolete Aikido scanner instructions.
 
 - Pull requests get path labels and at most one type label, `bug` or `enhancement`, from the shared tinkerologie PR labeler. Dependabot pull requests whose largest update is a patch or minor version merge automatically once the checks and commit statuses on their head commit have finished without a failure (a Codecov check that is still pending is not waited for; a Codecov failure blocks); majors, and pull requests with open review threads, stay for review.
 - Releases are split into two jobs. After the Test job's lint and tests, a read-only Package job installs dependencies, builds and packs the tarball; a separate Publish job, the only one with write access and an npm OIDC identity, publishes that tarball with lifecycle scripts disabled and creates the GitHub release. Dependency install scripts and the project's own build and test code therefore never run with publishing credentials, and the Publish job installs nothing (it checks that Node 24's bundled npm supports trusted publishing instead of upgrading npm). The Publish job checks npm again before publishing: a re-run after a partial failure skips the publish when npm already has that run's exact tarball and still creates the release; publishing runs one at a time, so a racing run that finds a different package on npm fails instead of publishing twice; and the tarball is kept for 7 days for such re-runs.
@@ -25,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Issue templates now pass the repository's ESLint YAML rules, which were failing `npm run lint` on `main`.
 
 ### Fixed
+
+- Release state listeners when HAP wrappers are rebuilt, removed or shut down; stop asynchronous discovery and later Matter stages after shutdown.
+- Keep stale Matter tracking when API unregistration rejects, and remove new bindings when registration rejects so discovery can retry.
+- Preserve the linked account on transient settings-page refresh failures and enforce a positive refresh interval in the settings form.
+- Replace the deprecated Zod `ZodTypeAny` alias with `ZodType`.
 
 ## [1.3.1] - 2026-09-25
 

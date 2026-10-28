@@ -1,5 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { DisposableAccessory } from './disposable.js'
 import { HAPStatus } from 'homebridge'
 import { NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
@@ -46,7 +47,13 @@ const SPEED_TO_OFF: Record<string, NeoCommand> = {
  * a `+CONT` suffix on FanMode, so turning it on/off must preserve the current fan speed
  * rather than sending a fixed command.
  */
-export class ModeSwitchAccessory {
+export class ModeSwitchAccessory implements DisposableAccessory {
+  private readonly unsubscribeState: () => void
+
+  dispose(): void {
+    this.unsubscribeState()
+  }
+
   constructor(
     private readonly platform: ActronAirNeoPlatform,
     private readonly accessory: PlatformAccessory,
@@ -65,7 +72,7 @@ export class ModeSwitchAccessory {
       .onSet(value => this.setOn(value))
 
     const path = READ_PATH[this.mode]
-    this.platform.state.onChange((changed) => {
+    this.unsubscribeState = this.platform.state.onChange((changed) => {
       if (changed.has('*') || changed.has(path))
         service.updateCharacteristic(this.platform.Characteristic.On, this.getOn())
     })

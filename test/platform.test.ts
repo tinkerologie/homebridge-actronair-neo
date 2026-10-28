@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ZoneAccessory } from '../src/accessories/zone.js'
 import { NeoAuthRevokedError } from '../src/neo/auth.js'
 import { NeoMqtt } from '../src/neo/mqtt.js'
@@ -48,6 +48,7 @@ function makeApi(options: { matterEnabled?: boolean } = {}) {
     on: (event: string, cb: () => void) => { handlers[event] = cb },
     platformAccessory: class {
       context: Record<string, unknown> = {}
+      services: unknown[] = []
       constructor(public displayName: string, public UUID: string, public category?: number) {}
     },
     registerPlatformAccessories: vi.fn(),
@@ -68,6 +69,12 @@ const log = Object.assign(vi.fn(), {
   success: vi.fn(),
 }) as never
 
+beforeEach(() => {
+  vi.mocked(ZoneAccessory).mockImplementation(function (this: { dispose: () => void }) {
+    this.dispose = vi.fn()
+  } as never)
+})
+
 afterEach(() => {
   vi.mocked(ZoneAccessory).mockReset()
   vi.mocked(NeoMqtt).mockClear()
@@ -75,6 +82,83 @@ afterEach(() => {
 })
 
 describe('actronAirNeoPlatform', () => {
+  it.each(['rediscovery', 'failed rebuild', 'removal', 'shutdown'])('manages zone listeners on %s', async (action) => {
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
+    const updated = vi.fn()
+    vi.mocked(ZoneAccessory).mockImplementation(function (this: { dispose: () => void }, platform, _accessory, index) {
+      this.dispose = platform.state.onChange(() => updated(index))
+    } as never)
+    let status = structuredClone(restStatus)
+    p.injectForTest({ getSystems: async () => systems, getStatus: async () => status } as never)
+    await p.discoverDevices()
+    if (action === 'rediscovery') {
+      await p.discoverDevices()
+    }
+    else if (action === 'failed rebuild') {
+      vi.mocked(ZoneAccessory).mockImplementationOnce(class {
+        constructor() {
+          throw new Error('Transient wrapper failure')
+        }
+      } as never)
+      await p.discoverDevices()
+    }
+    else if (action === 'removal') {
+      status = structuredClone(restStatus)
+      status.lastKnownState.RemoteZoneInfo[0].NV_Exists = false
+      await p.discoverDevices()
+    }
+    else {
+      api.handlers.shutdown()
+    }
+    updated.mockClear()
+    p.state.applyDelta({ 'UserAirconSettings.isOn': !status.lastKnownState.UserAirconSettings.isOn })
+    expect(updated.mock.calls.filter(([index]) => index === 0)).toHaveLength(['rediscovery', 'failed rebuild'].includes(action) ? 1 : 0)
+    api.handlers.shutdown()
+  })
+
+  it.each(['systems', 'status'])('abandons discovery when shutdown occurs during %s fetch', async (stage) => {
+    vi.useFakeTimers()
+    const api = makeApi({ matterEnabled: true })
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', refreshToken: 'rt' } as never, api)
+    let release!: (value: unknown) => void
+    const pending = new Promise((resolve) => {
+      release = resolve
+    })
+    const getStatus = vi.fn(async () => stage === 'status' ? pending : restStatus)
+    p.injectForTest({ getSystems: async () => stage === 'systems' ? pending : systems, getStatus } as never)
+    const discovery = p.discoverDevices()
+    await Promise.resolve()
+    api.handlers.shutdown()
+    release(stage === 'systems' ? systems : restStatus)
+    await discovery
+    expect(p.commands).toBeUndefined()
+    expect(NeoMqtt).not.toHaveBeenCalled()
+    expect(api.registerPlatformAccessories).not.toHaveBeenCalled()
+    expect(api.matter.registerPlatformAccessories).not.toHaveBeenCalled()
+    expect(api.matter.updatePlatformAccessories).not.toHaveBeenCalled()
+    expect(api.matter.unregisterPlatformAccessories).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    if (stage === 'systems')
+      expect(getStatus).not.toHaveBeenCalled()
+  })
+
+  it('does not start discovery or notify platform bindings after shutdown', async () => {
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
+    const getSystems = vi.fn(async () => systems)
+    p.injectForTest({ getSystems, getStatus: async () => restStatus } as never)
+    p.state.replace(restStatus.lastKnownState)
+    const update = vi.fn()
+    p.matterBindings.set('binding', { uuid: 'binding', accessory: { displayName: 'Binding' } as never, update })
+    api.handlers.shutdown()
+    await p.discoverDevices()
+    p.state.applyDelta({ 'UserAirconSettings.isOn': !restStatus.lastKnownState.UserAirconSettings.isOn })
+    expect(getSystems).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+    expect(p.matterBindings.size).toBe(0)
+  })
+
   it('does not start when no account is linked', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x' } as never, api)
@@ -237,9 +321,11 @@ describe('actronAirNeoPlatform', () => {
       getStatus: async () => restStatus,
     } as never)
 
-    vi.mocked(ZoneAccessory).mockImplementationOnce(() => {
-      throw new Error('bad characteristic range')
-    })
+    vi.mocked(ZoneAccessory).mockImplementationOnce(class {
+      constructor() {
+        throw new Error('bad characteristic range')
+      }
+    } as never)
 
     await expect(p.discoverDevices()).resolves.toBeUndefined()
 
@@ -817,6 +903,60 @@ describe('actronAirNeoPlatform', () => {
   })
 
   describe('matter integration', () => {
+    it.each(['register', 'update'])('stops later Matter stages if shutdown happens during %s', async (stage) => {
+      const api = makeApi({ matterEnabled: true })
+      const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
+      const cached = { UUID: 'matter-uuid-matter:neo000000', displayName: 'Master', context: {} } as never
+      const stale = { UUID: 'stale', displayName: 'Removed', context: {} } as never
+      p.configureMatterAccessory(cached)
+      p.configureMatterAccessory(stale)
+      const operation = stage === 'register' ? api.matter.registerPlatformAccessories : api.matter.updatePlatformAccessories
+      let release!: () => void
+      operation.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        release = resolve
+      }))
+      p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+      const discovery = p.discoverDevices()
+      await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce())
+      const trackedBeforeShutdown = p.matterAccessories.size
+      api.handlers.shutdown()
+      release()
+      await discovery
+      if (stage === 'register')
+        expect(api.matter.updatePlatformAccessories).not.toHaveBeenCalled()
+      expect(p.matterAccessories.size).toBe(trackedBeforeShutdown)
+      expect(p.matterBindings.size).toBe(0)
+      expect(api.matter.unregisterPlatformAccessories).not.toHaveBeenCalled()
+    })
+
+    it('keeps stale Matter tracking after unregister failure so discovery can retry', async () => {
+      const api = makeApi({ matterEnabled: true })
+      const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
+      const stale = { UUID: 'stale', displayName: 'Old Zone' } as never
+      const binding = { uuid: 'stale', accessory: stale, update: vi.fn() }
+      p.configureMatterAccessory(stale)
+      p.matterBindings.set('stale', binding)
+      p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+      api.matter.unregisterPlatformAccessories.mockRejectedValueOnce(new Error('offline'))
+      await p.discoverDevices()
+      expect(p.matterAccessories.get('stale')).toBe(stale)
+      expect(p.matterBindings.get('stale')).toBe(binding)
+      await p.discoverDevices()
+      expect(api.matter.unregisterPlatformAccessories).toHaveBeenCalledTimes(2)
+      expect(p.matterAccessories.has('stale')).toBe(false)
+      expect(p.matterBindings.has('stale')).toBe(false)
+    })
+
+    it('discards bindings for rejected new registrations', async () => {
+      const api = makeApi({ matterEnabled: true })
+      const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
+      p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+      api.matter.registerPlatformAccessories.mockRejectedValue(new Error('offline'))
+      await p.discoverDevices()
+      expect(p.matterAccessories.size).toBe(0)
+      expect(p.matterBindings.size).toBe(0)
+    })
+
     it('detects disabled Matter when not available on bridge', () => {
       const api = makeApi({ matterEnabled: false })
       log.info.mockClear()

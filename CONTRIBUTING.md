@@ -78,7 +78,7 @@ Before a pull request can be merged, it must satisfy all automated quality gates
 
 ### Prerequisites and Setup
 
-- Node.js (v20 or later)
+- Node.js 22 or 24 (Node 26 is also tested in CI)
 - npm (`npm ci`)
 
 ### Validation Commands
@@ -93,11 +93,11 @@ npm test
 # Run tests with coverage
 npm run test:coverage
 
-# Lint source files
+# Check lint and formatting rules with zero warnings
 npm run lint
 
-# Validate config schema
-npx homebridge-config-ui-x --schema-check config.schema.json
+# Type-check source without emitting JavaScript
+npm run typecheck
 ```
 
 ---

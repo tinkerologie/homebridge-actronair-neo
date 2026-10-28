@@ -235,3 +235,11 @@ describe('afterHoursAccessory', () => {
     })
   })
 })
+
+it('stops state pushes when disposed', () => {
+  const { afterHours, platform, service } = build(tree({ Enabled: false }))
+  const update = vi.spyOn(service, 'updateCharacteristic')
+  afterHours.dispose()
+  platform.state.applyDelta({ 'UserAirconSettings.AfterHours.Enabled': true })
+  expect(update).not.toHaveBeenCalled()
+})

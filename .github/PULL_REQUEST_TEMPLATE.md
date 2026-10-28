@@ -64,7 +64,8 @@ Fixes #
 <!-- Check all that apply and describe what you tested -->
 
 - [ ] Ran unit tests (`npm test`)
-- [ ] Ran linter and type-checker (`npm run lint`)
+- [ ] Ran linter and formatting checks (`npm run lint`)
+- [ ] Ran type-checker (`npm run typecheck`)
 - [ ] Ran build (`npm run build`)
 - [ ] Tested live against real device or local Homebridge instance
 - [ ] Not applicable (documentation-only or metadata-only change)

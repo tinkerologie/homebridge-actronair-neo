@@ -675,3 +675,13 @@ describe('zoneAccessory sensors (battery, temperature, humidity)', () => {
     await expect(cool.invokeSet(29)).rejects.toBeTruthy()
   })
 })
+
+it('stops state pushes when disposed', () => {
+  const { platform, state } = makePlatform()
+  const accessory = new FakeAccessory('Zone A')
+  const zone = new ZoneAccessory(platform, accessory as never, 0)
+  const update = vi.spyOn(accessory.getService(ServiceTypes.Switch)!, 'updateCharacteristic')
+  zone.dispose()
+  state.applyDelta({ 'UserAirconSettings.EnabledZones[0]': !state.get('UserAirconSettings.EnabledZones[0]') })
+  expect(update).not.toHaveBeenCalled()
+})

@@ -55,6 +55,7 @@
         "title": "Refresh Interval (seconds)",
         "description": "How often the plugin polls the ActronAir cloud for status. Used whenever live push updates are unavailable or stale; once push updates connect, polling backs off to a slower safety-net cadence.",
         "type": "integer",
+        "minimum": 1,
         "required": false,
         "default": 60
       },

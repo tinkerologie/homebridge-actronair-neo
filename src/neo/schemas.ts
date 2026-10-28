@@ -238,7 +238,7 @@ export const StatusChangeSchema = z.preprocess((val) => {
  * (including booleans — never coerced, "true" is not true) must arrive as its real type or
  * the whole delta is rejected.
  */
-const ALLOWED_DELTA_PATHS: Record<string, z.ZodTypeAny> = {
+const ALLOWED_DELTA_PATHS: Record<string, z.ZodType> = {
   'UserAirconSettings.isOn': z.boolean(),
   'UserAirconSettings.Mode': z.string(),
   'UserAirconSettings.FanMode': z.string(),
