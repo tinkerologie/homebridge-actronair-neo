@@ -63,6 +63,7 @@ jobs:
         with:
           files: coverage/lcov.info
           disable_search: true
+          plugins: noop
           fail_ci_if_error: true
           use_oidc: true
 
@@ -85,4 +86,5 @@ jobs:
         with:
           files: coverage/lcov.info
           disable_search: true
+          plugins: noop
           fail_ci_if_error: true
