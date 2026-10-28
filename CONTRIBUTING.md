@@ -78,7 +78,7 @@ Before a pull request can be merged, it must satisfy all automated quality gates
 
 ### Prerequisites and Setup
 
-- Node.js 22 or 24 (Node 26 is also tested in CI)
+- Node.js 22, 24 or 26
 - npm (`npm ci`)
 
 ### Validation Commands

@@ -73,7 +73,7 @@ This allows integrating your ActronAir Neo system across Matter-compatible smart
 ## Requirements
 
 - Homebridge 2.x
-- Node.js 22 or 24
+- Node.js 22, 24 or 26
 - An ActronAir Neo account with at least one registered system
 
 ## Installation

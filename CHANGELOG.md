@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A current Homebridge development audit, explicit type checking, LCOV reports and Codecov project/patch checks. CI and release validation also test Node 26.
+- A current Homebridge development audit, explicit type checking, LCOV reports and Codecov project/patch checks. Node 26 support is declared after passing local and CI validation; CI and release validation cover Node 22, 24 and 26.
 
 ### Changed
 
