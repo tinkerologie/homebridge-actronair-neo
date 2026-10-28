@@ -16,6 +16,7 @@ Control your ActronAir Neo air conditioning system with Apple HomeKit and Matter
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Development](#development)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 - [Support](#support)
@@ -72,7 +73,7 @@ This allows integrating your ActronAir Neo system across Matter-compatible smart
 ## Requirements
 
 - Homebridge 2.x
-- Node.js 22 or 24
+- Node.js 22, 24 or 26
 - An ActronAir Neo account with at least one registered system
 
 ## Installation
@@ -100,6 +101,17 @@ own: your model, its capabilities, and the accessories to expose. That leaves th
 | **Enable zone control** | Off | Give each zone its own accessory with independent temperature setpoints, instead of an on/off switch. Needs a system that supports per-zone setpoints. |
 | **Refresh Interval (seconds)** | 60 | How often to poll the ActronAir cloud. Live push updates arrive in about a second regardless; polling is the safety net beneath them, and backs off automatically while push is healthy. |
 | **Enable Debug Logging** | Off | Log this plugin's request, command and coalescing detail at info level, without running all of Homebridge in debug mode. |
+
+## Development
+
+Run `npm ci`, `npm run lint` (including formatting, with zero warnings),
+`npm run typecheck`, `npm test`, `npm run test:coverage`, and `npm run build`.
+CI tests Node 22, 24 and 26 and uploads LCOV coverage to Codecov.
+
+See the [2026 development audit](docs/homebridge-development-audit-2026.md) for API checks,
+coverage enforcement prerequisites and TypeScript 7 compatibility findings. TypeScript 7.0.2
+passed an isolated compiler and startup check; the project retains TypeScript 6 for
+compatibility with the current ESLint parser.
 
 ## Troubleshooting
 

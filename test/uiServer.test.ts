@@ -17,6 +17,19 @@ afterEach(() => {
 })
 
 describe('homebridge-ui server', () => {
+  it.each([400, 401])('classifies OAuth HTTP %s as an invalid link', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status })))
+    const { default: server } = await import('../homebridge-ui/server.js')
+    await expect(server.session({ refreshToken: 'rt' })).resolves.toEqual({ state: 'invalid' })
+  })
+
+  it.each([403, 429, 503])('keeps the account link on transient HTTP %s', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status })))
+    const { default: server } = await import('../homebridge-ui/server.js')
+    // Rejections already reach the browser's showCloudError retry view.
+    await expect(server.session({ refreshToken: 'rt' })).rejects.toThrow(/try again/i)
+  })
+
   it('attaches an abort signal to the token-exchange fetch so a hung connection cannot block the settings UI forever', async () => {
     let seenSignal: AbortSignal | undefined
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {

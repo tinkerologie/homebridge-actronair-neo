@@ -16,6 +16,10 @@ describe('parseConfig', () => {
     expect(cfg.refreshIntervalMs).toBe(30_000)
   })
 
+  it.each([0, -1, 0.5])('rejects an invalid refresh interval of %s', (refreshInterval) => {
+    expect(() => parseConfig({ refreshInterval })).toThrow(/refreshInterval/)
+  })
+
   it('rejects a non-numeric refreshInterval', () => {
     expect(() => parseConfig({ platform: 'ActronAirNeo', name: 'x', refreshInterval: 'soon' }))
       .toThrow(/refreshInterval/)
@@ -56,6 +60,15 @@ describe('config.schema.json form visibility', () => {
   // hidden via `condition`, which round-trips the value untouched.
   const schema = JSON.parse(readFileSync(new URL('../config.schema.json', import.meta.url), 'utf8'))
   const props = schema.schema.properties
+
+  it('keeps form defaults aligned with runtime defaults', () => {
+    const defaults = parseConfig({})
+    for (const [key, property] of Object.entries(props)) {
+      if (Object.hasOwn(property as object, 'default'))
+        expect((property as { default: unknown }).default).toEqual(defaults[key])
+    }
+    expect(props.refreshInterval.minimum).toBe(1)
+  })
 
   it.each(['refreshToken', 'deviceSerial', 'clientId'])(
     'declares %s so a schema-form save cannot drop it, but never renders it',

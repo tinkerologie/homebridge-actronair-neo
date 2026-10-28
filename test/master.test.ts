@@ -747,3 +747,11 @@ describe('setpoint characteristics stay inside the range HAP was told about', ()
     expect(master.getCoolingThresholdTemperature()).toBe(23.5)
   })
 })
+
+it('stops state pushes when disposed', () => {
+  const { master, platform, hvac } = makeHarness()
+  const update = vi.spyOn(hvac, 'updateCharacteristic')
+  master.dispose()
+  platform.state.applyDelta({ 'UserAirconSettings.isOn': !platform.state.get('UserAirconSettings.isOn') })
+  expect(update).not.toHaveBeenCalled()
+})

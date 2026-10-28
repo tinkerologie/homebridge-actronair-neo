@@ -1,13 +1,16 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 import type { UserSetpointLimits } from '../neo/capabilities.js'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { DisposableAccessory } from './disposable.js'
 import { HAPStatus } from 'homebridge'
 import { getUsableZoneHumidity, getUsableZoneTemp, getUserSetpointLimits, resolveSetpointBounds } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, CompressorMode, NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
 
-export class ZoneAccessory {
+export class ZoneAccessory implements DisposableAccessory {
+  private readonly unsubscribeState: () => void
+
   private readonly zoneService: Service
   private humidityService: Service | undefined
   /** Switch mode only — HeaterCooler mode already carries CurrentTemperature itself. */
@@ -31,6 +34,10 @@ export class ZoneAccessory {
     name: string
     coolSetpoint: string
     heatSetpoint: string
+  }
+
+  dispose(): void {
+    this.unsubscribeState()
   }
 
   constructor(
@@ -187,7 +194,7 @@ export class ZoneAccessory {
       .onGet(this.getLowBatteryStatus.bind(this))
 
     // Single poll loop lives on the platform now; react only to deltas that touch this zone.
-    this.platform.state.onChange(changed => this.pushCharacteristics(changed))
+    this.unsubscribeState = this.platform.state.onChange(changed => this.pushCharacteristics(changed))
   }
 
   private pushCharacteristics(changed: Set<string>): void {

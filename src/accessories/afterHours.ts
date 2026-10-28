@@ -1,5 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { DisposableAccessory } from './disposable.js'
 import { HAPStatus } from 'homebridge'
 import { NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
@@ -41,7 +42,13 @@ const STEP_DURATION_SEC = STEP_DURATION_MIN * SECONDS_PER_MINUTE
  *     Active because Actron doesn't report a live remaining-time countdown, only the
  *     configured duration.
  */
-export class AfterHoursAccessory {
+export class AfterHoursAccessory implements DisposableAccessory {
+  private readonly unsubscribeState: () => void
+
+  dispose(): void {
+    this.unsubscribeState()
+  }
+
   constructor(
     private readonly platform: ActronAirNeoPlatform,
     private readonly accessory: PlatformAccessory,
@@ -72,7 +79,7 @@ export class AfterHoursAccessory {
       .onGet(() => this.getDuration())
       .onSet(value => this.setDuration(value))
 
-    this.platform.state.onChange((changed) => {
+    this.unsubscribeState = this.platform.state.onChange((changed) => {
       if (changed.has('*') || changed.has(ENABLED_PATH)) {
         service.updateCharacteristic(this.platform.Characteristic.Active, this.getActive())
         service.updateCharacteristic(this.platform.Characteristic.InUse, this.getActive())

@@ -247,3 +247,11 @@ describe('outdoorTempAccessory', () => {
     expect(sensor.updates.length).toBe(0)
   })
 })
+
+it('stops state pushes when disposed', () => {
+  const { outdoor, state, sensor } = makeHarness(baseTree())
+  const update = vi.spyOn(sensor, 'updateCharacteristic')
+  outdoor.dispose()
+  state.applyDelta({ 'MasterInfo.LiveOutdoorTemp_oC': 25 })
+  expect(update).not.toHaveBeenCalled()
+})

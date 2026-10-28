@@ -251,3 +251,11 @@ describe('modeSwitchAccessory', () => {
     })
   })
 })
+
+it('stops state pushes when disposed', () => {
+  const { modeSwitch, platform, service } = build('away', tree({ AwayMode: false } as never))
+  const update = vi.spyOn(service, 'updateCharacteristic')
+  modeSwitch.dispose()
+  platform.state.applyDelta({ 'UserAirconSettings.AwayMode': true })
+  expect(update).not.toHaveBeenCalled()
+})

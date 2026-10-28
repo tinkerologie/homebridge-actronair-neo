@@ -1,5 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { DisposableAccessory } from './disposable.js'
 import { HAPStatus } from 'homebridge'
 import { getUsableMasterHumidity, getUsableMasterTemp, resolveSetpointBounds } from '../neo/capabilities.js'
 import { ClimateMode, CompressorMode, FanMode, NeoCommand } from '../neo/types.js'
@@ -69,7 +70,9 @@ function clampToBounds(value: number | undefined, bounds: { min: number, max: nu
   return Math.min(bounds.max, Math.max(bounds.min, value))
 }
 
-export class MasterAccessory {
+export class MasterAccessory implements DisposableAccessory {
+  private readonly unsubscribeState: () => void
+
   private readonly hvacService: Service
   private readonly humidityService: Service
   /**
@@ -108,6 +111,10 @@ export class MasterAccessory {
    */
   private lastGoodTemp: number | undefined
   private lastGoodHumidity: number | undefined
+
+  dispose(): void {
+    this.unsubscribeState()
+  }
 
   constructor(
     private readonly platform: ActronAirNeoPlatform,
@@ -247,7 +254,7 @@ export class MasterAccessory {
       .onGet(this.getFilterChangeIndication.bind(this))
 
     // Single poll loop lives on the platform now; this replaces the two setInterval timers.
-    this.platform.state.onChange(changed => this.pushCharacteristics(changed))
+    this.unsubscribeState = this.platform.state.onChange(changed => this.pushCharacteristics(changed))
   }
 
   /**

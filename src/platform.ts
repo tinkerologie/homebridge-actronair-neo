@@ -8,6 +8,7 @@ import type {
   PlatformConfig,
   Service,
 } from 'homebridge'
+import type { DisposableAccessory } from './accessories/disposable.js'
 import type { NeoConfig } from './config.js'
 import type { MatterBinding } from './matter/types.js'
 import type { NeoCapabilities } from './neo/capabilities.js'
@@ -106,6 +107,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
    * timer right after `clearTimeout` cleared it.
    */
   private shuttingDown = false
+  private readonly hapBindings = new Map<string, DisposableAccessory>()
+  private readonly unsubscribeState: () => void
   /** Consecutive poll failures — see the catch in poll(). */
   private pollFailures = 0
   /** The re-link message is actionable exactly once, not once every poll until they act. */
@@ -137,7 +140,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     // where a zone changed in the ActronAir app was still "on" in the queue — and the next
     // HomeKit zone toggle, which always sends the whole array, would silently revert it.
     // syncEnabledZones() keeps its own guard against clobbering a still-pending toggle.
-    this.state.onChange((changed) => {
+    this.unsubscribeState = this.state.onChange((changed) => {
       if (changed.has('*') || [...changed].some(path => path.startsWith('UserAirconSettings.EnabledZones')))
         this.commands?.syncEnabledZones(this.state.get<boolean[]>('UserAirconSettings.EnabledZones') ?? [])
 
@@ -166,6 +169,11 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       clearTimeout(this.pollTimer)
       this.mqtt?.stop()
       this.commands?.cancelPending()
+      this.unsubscribeState()
+      for (const binding of this.hapBindings.values())
+        binding.dispose()
+      this.hapBindings.clear()
+      this.matterBindings.clear()
     })
   }
 
@@ -185,6 +193,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
   }
 
   async discoverDevices(): Promise<void> {
+    if (this.shuttingDown)
+      return
     if (!this.rest) {
       this.log.warn(
         'ActronAir account is not linked — open the plugin settings and link your account to start the plugin.',
@@ -195,6 +205,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     let discovered: Discovered[]
     try {
       const systems = await this.rest.getSystems()
+      if (this.shuttingDown)
+        return
       const list = systems._embedded['ac-system']
       const target = this.cfg.deviceSerial
         ? list.find(s => s.serial === this.cfg.deviceSerial)
@@ -204,6 +216,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.serial = target.serial
 
       const status = await this.rest.getStatus(this.serial)
+      if (this.shuttingDown)
+        return
       this.state.setCloudConnected(status.isOnline)
       this.state.replace(status.lastKnownState)
 
@@ -277,13 +291,15 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     // That must never propagate out of discovery — it runs in its own protected region so
     // a bad accessory logs and is skipped rather than crashing the platform.
     try {
+      if (this.shuttingDown)
+        return
       this.syncAccessories(discovered)
     }
     catch (error) {
       this.log.error(`Accessory sync failed: ${(error as Error).message}`)
     }
 
-    if (this.isMatterSupported) {
+    if (this.isMatterSupported && !this.shuttingDown) {
       try {
         await this.syncMatterAccessories(discovered)
       }
@@ -320,7 +336,10 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         accessory.displayName = device.displayName
 
       try {
-        this.build(device, accessory)
+        // Keep the previous subscription usable if the replacement cannot initialize.
+        const binding = this.build(device, accessory)
+        this.hapBindings.get(uuid)?.dispose()
+        this.hapBindings.set(uuid, binding)
       }
       catch (error) {
         // One broken accessory must not stop the others from registering.
@@ -372,6 +391,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.log.info(`Removing ${stale.length} accessories that are no longer present`)
       this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, stale)
       for (const accessory of stale) {
+        this.hapBindings.get(accessory.UUID)?.dispose()
+        this.hapBindings.delete(accessory.UUID)
         const index = this.accessories.indexOf(accessory)
         if (index !== -1)
           this.accessories.splice(index, 1)
@@ -381,7 +402,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
 
   private async syncMatterAccessories(discovered: Discovered[]): Promise<void> {
     const matter = this.api.matter
-    if (!matter)
+    if (!matter || this.shuttingDown)
       return
 
     const wanted = new Set<string>()
@@ -422,14 +443,21 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.log.info(`Registering ${toRegister.length} Matter accessories`)
       try {
         await matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, toRegister)
+        if (this.shuttingDown)
+          return
         for (const acc of toRegister) {
           this.matterAccessories.set(acc.UUID, acc)
         }
       }
       catch (error) {
+        for (const acc of toRegister)
+          this.matterBindings.delete(acc.UUID)
         this.log.error(`Failed to register Matter accessories: ${(error as Error).message}`)
       }
     }
+
+    if (this.shuttingDown)
+      return
 
     if (toUpdate.length > 0) {
       try {
@@ -440,12 +468,13 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       }
     }
 
+    if (this.shuttingDown)
+      return
+
     const stale: MatterAccessory[] = []
     for (const [uuid, acc] of this.matterAccessories.entries()) {
       if (!wanted.has(uuid)) {
         stale.push(acc)
-        this.matterAccessories.delete(uuid)
-        this.matterBindings.delete(uuid)
       }
     }
 
@@ -453,6 +482,10 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.log.info(`Removing ${stale.length} Matter accessories that are no longer present`)
       try {
         await matter.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, stale)
+        for (const acc of stale) {
+          this.matterAccessories.delete(acc.UUID)
+          this.matterBindings.delete(acc.UUID)
+        }
       }
       catch (error) {
         this.log.error(`Failed to unregister stale Matter accessories: ${(error as Error).message}`)
@@ -486,40 +519,24 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     return cached.UUID
   }
 
-  private build(device: Discovered, accessory: PlatformAccessory): void {
+  private build(device: Discovered, accessory: PlatformAccessory): DisposableAccessory {
     switch (device.kind) {
       case 'master':
-        // eslint-disable-next-line no-new
-        new MasterAccessory(this, accessory)
-        break
+        return new MasterAccessory(this, accessory)
       case 'zone':
-        // eslint-disable-next-line no-new
-        new ZoneAccessory(this, accessory, device.zoneIndex!)
-        break
+        return new ZoneAccessory(this, accessory, device.zoneIndex!)
       case 'away':
-        // eslint-disable-next-line no-new
-        new ModeSwitchAccessory(this, accessory, 'away')
-        break
+        return new ModeSwitchAccessory(this, accessory, 'away')
       case 'quiet':
-        // eslint-disable-next-line no-new
-        new ModeSwitchAccessory(this, accessory, 'quiet')
-        break
+        return new ModeSwitchAccessory(this, accessory, 'quiet')
       case 'continuousFan':
-        // eslint-disable-next-line no-new
-        new ModeSwitchAccessory(this, accessory, 'continuousFan')
-        break
+        return new ModeSwitchAccessory(this, accessory, 'continuousFan')
       case 'outdoorTemp':
-        // eslint-disable-next-line no-new
-        new OutdoorTempAccessory(this, accessory)
-        break
+        return new OutdoorTempAccessory(this, accessory)
       case 'afterHours':
-        // eslint-disable-next-line no-new
-        new AfterHoursAccessory(this, accessory)
-        break
+        return new AfterHoursAccessory(this, accessory)
       case 'turbo':
-        // eslint-disable-next-line no-new
-        new ModeSwitchAccessory(this, accessory, 'turbo')
-        break
+        return new ModeSwitchAccessory(this, accessory, 'turbo')
     }
   }
 
@@ -530,7 +547,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
    * caught, logged and retried with backoff; polling keeps running unaffected either way.
    */
   private startPush(): void {
-    if (this.mqtt || !this.auth)
+    if (this.shuttingDown || this.mqtt || !this.auth)
       return
     this.mqtt = new NeoMqtt({
       rest: this.rest,

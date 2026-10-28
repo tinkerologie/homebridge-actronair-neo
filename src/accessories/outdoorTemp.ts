@@ -1,5 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { DisposableAccessory } from './disposable.js'
 import { HAPStatus } from 'homebridge'
 import { getUsableOutdoorTemp } from '../neo/capabilities.js'
 
@@ -9,13 +10,19 @@ const WATCHED = {
   sensErr: 'LiveAircon.OutdoorUnit.AmbientSensErr',
 } as const
 
-export class OutdoorTempAccessory {
+export class OutdoorTempAccessory implements DisposableAccessory {
+  private readonly unsubscribeState: () => void
+
   private readonly service: Service
   /**
    * Last valid reading, served when the cloud momentarily reports an unusable one — stale
    * but real beats a fabricated 0°C. Undefined only until the first valid reading arrives.
    */
   private lastGood: number | undefined
+
+  dispose(): void {
+    this.unsubscribeState()
+  }
 
   constructor(
     private readonly platform: ActronAirNeoPlatform,
@@ -51,7 +58,7 @@ export class OutdoorTempAccessory {
       .onGet(this.getStatusFault.bind(this))
 
     // Single poll loop lives on the platform; no timer here.
-    this.platform.state.onChange((changed) => {
+    this.unsubscribeState = this.platform.state.onChange((changed) => {
       if (changed.has('*') || changed.has(WATCHED.outdoorTemp) || changed.has(WATCHED.sensErr)) {
         // Status first, deliberately: getCurrentTemperature() throws when there has never been a
         // usable reading, and NeoState swallows a throwing listener — pushing the temperature

@@ -60,8 +60,10 @@ class UiServer extends HomebridgePluginUiServer {
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
     })
-    if (status !== 200)
+    if (status === 400 || status === 401)
       return { state: 'invalid' }
+    if (status !== 200)
+      throw new Error(`Could not reach the ActronAir cloud (HTTP ${status}). Please try again.`)
     return { state: 'ok', accessToken: json.access_token }
   }
 
