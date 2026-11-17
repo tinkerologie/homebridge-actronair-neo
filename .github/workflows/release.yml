@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   test:
+    timeout-minutes: 60
     name: Test
     runs-on: ubuntu-latest
     strategy:
@@ -34,6 +35,7 @@ jobs:
   # with a read-only token and no OIDC identity. The Publish job only uploads the tarball
   # built here.
   package:
+    timeout-minutes: 60
     name: Package
     needs: test
     if: github.repository == 'tinkerologie/homebridge-actronair-neo'
@@ -107,6 +109,7 @@ jobs:
   # The only job with write access and an OIDC identity. It does not check out the
   # repository or install anything: it publishes the tarball the Package job built.
   publish:
+    timeout-minutes: 60
     name: Publish
     needs: package
     if: needs.package.outputs.tagged == 'false'

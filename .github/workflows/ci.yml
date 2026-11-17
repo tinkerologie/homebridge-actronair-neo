@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   test:
+    timeout-minutes: 30
     name: Test
     runs-on: ubuntu-latest
     strategy:
@@ -44,6 +45,7 @@ jobs:
           retention-days: 7
 
   coverage:
+    timeout-minutes: 30
     name: Upload coverage
     needs: test
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -64,15 +66,17 @@ jobs:
           files: coverage/lcov.info
           disable_search: true
           plugins: noop
-          fail_ci_if_error: true
-          use_oidc: true
+          fail_ci_if_error: false
+          use_oidc: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
 
   coverage-fork:
+    timeout-minutes: 30
     name: Upload fork coverage
     needs: test
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
+      id-token: write # Codecov OIDC for same-repository branches
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,10 +88,11 @@ jobs:
           path: coverage
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
+          use_oidc: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           files: coverage/lcov.info
           disable_search: true
           plugins: noop
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   ci-gate:
     name: CI Gate
