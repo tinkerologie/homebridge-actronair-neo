@@ -69,7 +69,9 @@ function usableIndoorTemp(temp: number | undefined): number | undefined {
 
 /** Outside the physically possible range (which also catches the 3000 sentinel) is no reading. */
 function usableHumidity(humidity: number | undefined): number | undefined {
-  return humidity === undefined || humidity < 0 || humidity > 100 ? undefined : humidity
+  return humidity === undefined || humidity < 0 || humidity > 100
+    ? undefined
+    : humidity
 }
 
 /**
@@ -142,7 +144,9 @@ export function resolveSetpointBounds(
 ): { min: number, max: number } {
   const fallback = DEFAULT_BOUNDS[mode]
   const limits = getUserSetpointLimits(state)
-  const key = mode === 'heat' ? 'Heat' : 'Cool'
+  const key = mode === 'heat'
+    ? 'Heat'
+    : 'Cool'
   const zone = (bound: 'Min' | 'Max'): number | undefined =>
     zoneIndex === undefined
       ? undefined
@@ -192,7 +196,9 @@ export interface NeoModeSupport {
 export function deriveModeSupport(state: NeoState): NeoModeSupport {
   const reported = state.get<Record<string, unknown>>('UserAirconSettings.ModeSupport')
   const supported = (key: string, fallback: boolean): boolean =>
-    typeof reported?.[key] === 'boolean' ? reported[key] as boolean : fallback
+    typeof reported?.[key] === 'boolean'
+      ? reported[key] as boolean
+      : fallback
 
   return {
     cool: supported('Cool', true),
@@ -212,7 +218,12 @@ const FAN_BIT: Partial<Record<FanMode, number>> = {
 }
 
 /** Canonical slider order — AUTO always last so it can occupy the top band. */
-const FAN_ORDER: readonly FanMode[] = [FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH, FanMode.AUTO]
+const FAN_ORDER: readonly FanMode[] = [
+  FanMode.LOW,
+  FanMode.MEDIUM,
+  FanMode.HIGH,
+  FanMode.AUTO,
+]
 
 /**
  * Decodes NV_SupportedFanModes, unions in whatever speed the unit is currently running (the

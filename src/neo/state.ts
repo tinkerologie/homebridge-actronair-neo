@@ -5,7 +5,12 @@ import { validateDeltaValue } from './schemas.js'
 export type ChangeListener = (changedPaths: Set<string>) => void
 
 /** Delta keys that are metadata, not state. */
-const DELTA_METADATA_KEYS = new Set(['type', 'serial', 'isOnline', 'wcFirmware'])
+const DELTA_METADATA_KEYS = new Set([
+  'type',
+  'serial',
+  'isOnline',
+  'wcFirmware',
+])
 
 /** Why a single path/value pair in a delta was not applied. */
 export interface DeltaRejection {
@@ -59,7 +64,9 @@ export class NeoState {
   }
 
   get<T = unknown>(path: string): T | undefined {
-    return this.tree ? getPath<T>(this.tree, path) : undefined
+    return this.tree
+      ? getPath<T>(this.tree, path)
+      : undefined
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -69,7 +76,9 @@ export class NeoState {
 
   /** Wholesale replacement from a REST poll or an MQTT full-status. */
   replace(next: StatusTree): void {
-    const changed = this.tree ? diffPaths(this.tree, next) : new Set<string>(['*'])
+    const changed = this.tree
+      ? diffPaths(this.tree, next)
+      : new Set<string>(['*'])
     this.tree = next
     if (changed.size)
       this.emit(changed)
@@ -179,8 +188,14 @@ function diffPaths(a: unknown, b: unknown, prefix = '', out = new Set<string>())
   }
 
   if (isPlainObject(a) && isPlainObject(b)) {
-    for (const key of new Set([...Object.keys(a), ...Object.keys(b)]))
-      diffPaths(a[key], b[key], prefix ? `${prefix}.${key}` : key, out)
+    for (const key of new Set([
+      ...Object.keys(a),
+      ...Object.keys(b),
+    ])) {
+      diffPaths(a[key], b[key], prefix
+        ? `${prefix}.${key}`
+        : key, out)
+    }
     return out
   }
 
@@ -193,7 +208,11 @@ function diffPaths(a: unknown, b: unknown, prefix = '', out = new Set<string>())
     // (`Alerts.CleanFilter`, `...AmbientSensErr`, `AfterHours.Enabled`) silently misses the
     // change and stays on its previous value. Emitting the leaves as well is what keeps a leaf
     // watcher correct without every accessory having to also watch each ancestor path.
-    const container = isContainer(a) ? a : isContainer(b) ? b : undefined
+    const container = isContainer(a)
+      ? a
+      : isContainer(b)
+        ? b
+        : undefined
     if (container !== undefined)
       addLeafPaths(container, prefix, out)
   }

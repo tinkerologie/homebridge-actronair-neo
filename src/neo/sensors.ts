@@ -51,7 +51,9 @@ const WIRELESS_PREFIX = 'ZS: '
  */
 export function resolveZoneSensor(state: NeoState, zoneIndex: number): ZoneSensorInfo {
   const sensors = state.get<Record<string, ZoneSensorEntry>>(`RemoteZoneInfo[${zoneIndex}].Sensors`)
-  const kindRaw = sensors ? Object.values(sensors)[0]?.NV_Kind : undefined
+  const kindRaw = sensors
+    ? Object.values(sensors)[0]?.NV_Kind
+    : undefined
   if (!kindRaw)
     return { kind: 'unknown' }
 
@@ -62,13 +64,17 @@ export function resolveZoneSensor(state: NeoState, zoneIndex: number): ZoneSenso
       kind: 'wireless',
       batteryPct: peripheral?.RemainingBatteryCapacity_pc,
       rssi: peripheral?.RSSI?.Local,
-      connected: peripheral ? peripheral.ConnectionState === 'Connected' : undefined,
+      connected: peripheral
+        ? peripheral.ConnectionState === 'Connected'
+        : undefined,
     }
   }
 
   const bus = state.get<BusSensor[]>('AirconSystem.Sensors')?.find(s => s.Designator === kindRaw)
   return {
     kind: 'wired',
-    connected: bus ? bus.Detected === true : undefined,
+    connected: bus
+      ? bus.Detected === true
+      : undefined,
   }
 }

@@ -22,7 +22,9 @@ import { normalizeDeltaPath } from './paths.js'
  */
 const ABSENT_NUMERIC = new Set<unknown>(['NA', null, ''])
 const numeric = z.preprocess(
-  v => (ABSENT_NUMERIC.has(v) ? undefined : v),
+  v => (ABSENT_NUMERIC.has(v)
+    ? undefined
+    : v),
   z.coerce.number().optional(),
 )
 
@@ -345,8 +347,13 @@ export function validateDeltaValue(path: string, value: unknown): DeltaValidatio
     return { ok: false, kind: 'unknown-path', reason: 'not a path this plugin reads' }
 
   const parsed = schema.safeParse(value)
-  if (!parsed.success)
-    return { ok: false, kind: 'invalid-value', reason: parsed.error.issues.map(issue => issue.message).join('; ') }
+  if (!parsed.success) {
+    return {
+      ok: false,
+      kind: 'invalid-value',
+      reason: parsed.error.issues.map(issue => issue.message).join('; '),
+    }
+  }
 
   return { ok: true, value: parsed.data }
 }
@@ -372,10 +379,16 @@ export const ConnectionDetailsSchema = z.preprocess((val) => {
   const userId = candidate.UserId ?? candidate.userId ?? candidate.user_id ?? candidate.username
 
   return {
-    Endpoint: endpoint === undefined || endpoint === null ? undefined : String(endpoint).trim(),
+    Endpoint: endpoint === undefined || endpoint === null
+      ? undefined
+      : String(endpoint).trim(),
     Port: port,
-    Protocol: protocol === undefined || protocol === null ? 'TLS' : String(protocol).trim(),
-    UserId: userId === undefined || userId === null ? undefined : String(userId).trim(),
+    Protocol: protocol === undefined || protocol === null
+      ? 'TLS'
+      : String(protocol).trim(),
+    UserId: userId === undefined || userId === null
+      ? undefined
+      : String(userId).trim(),
   }
 }, z.looseObject({
   Endpoint: z.string().min(1),

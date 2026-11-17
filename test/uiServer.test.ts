@@ -49,7 +49,10 @@ describe('homebridge-ui server', () => {
     const seenSignals: (AbortSignal | undefined)[] = []
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
       seenSignals.push(init.signal as AbortSignal | undefined)
-      return new Response(JSON.stringify({ email: 'x@example.com', _embedded: { 'ac-system': [] } }), { status: 200 })
+      return new Response(JSON.stringify({
+        email: 'x@example.com',
+        _embedded: { 'ac-system': [] },
+      }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchImpl)
 

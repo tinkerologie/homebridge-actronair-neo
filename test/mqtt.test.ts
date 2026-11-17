@@ -11,7 +11,12 @@ const fullStatusPush = JSON.parse(readFileSync('test/fixtures/full-status.json',
 const statusChangePush = JSON.parse(readFileSync('test/fixtures/status-change.json', 'utf8'))
 
 const SERIAL = '22h09780'
-const CONNECTION_DETAILS = { Endpoint: '203.0.113.10', Port: 8883, Protocol: 'TLS', UserId: 'user-1' }
+const CONNECTION_DETAILS = {
+  Endpoint: '203.0.113.10',
+  Port: 8883,
+  Protocol: 'TLS',
+  UserId: 'user-1',
+}
 
 const logMocks = {
   debug: vi.fn(),
@@ -55,7 +60,10 @@ function buildRest(getStatusImpl?: () => Promise<typeof restStatus>, accountEmai
 }
 
 function buildAuth(tokenImpl?: () => Promise<string>) {
-  return { getAccessToken: vi.fn(tokenImpl ?? (async () => 'token-1')), invalidate: vi.fn() }
+  return {
+    getAccessToken: vi.fn(tokenImpl ?? (async () => 'token-1')),
+    invalidate: vi.fn(),
+  }
 }
 
 describe('neoMqtt', () => {
@@ -66,7 +74,14 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -88,7 +103,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -108,7 +130,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -130,7 +159,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -151,7 +187,14 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -164,13 +207,30 @@ describe('neoMqtt', () => {
   it('reconnects with exponential backoff (0.5s, 1s, 2s, ...) that actually caps at 60s, resetting after a success', async () => {
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     expect(impl).toHaveBeenCalledTimes(1)
 
     // 500 -> 1000 -> 2000 -> 4000 -> 8000 -> 16000 -> 32000 -> 60000(capped) -> 60000(stays capped)
-    const expectedDelays = [500, 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000]
+    const expectedDelays = [
+      500,
+      1000,
+      2000,
+      4000,
+      8000,
+      16000,
+      32000,
+      60000,
+      60000,
+    ]
     for (const [i, delay] of expectedDelays.entries()) {
       clients[i].emit('close') // failed attempt
       await vi.advanceTimersByTimeAsync(delay - 1)
@@ -197,7 +257,14 @@ describe('neoMqtt', () => {
     const auth = buildAuth()
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: auth as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: auth as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     expect(impl).toHaveBeenCalledTimes(1)
@@ -230,7 +297,14 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     state.replace(restStatus.lastKnownState)
     const { impl } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     const starting = mqtt.start()
     mqtt.stop()
@@ -247,7 +321,14 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     state.replace(restStatus.lastKnownState)
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     expect(clients).toHaveLength(1)
@@ -265,7 +346,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -298,7 +386,14 @@ describe('neoMqtt', () => {
       getStatus: vi.fn(async () => restStatus),
     }
     const { impl } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await expect(mqtt.start()).resolves.toBeUndefined()
     expect(impl).not.toHaveBeenCalled()
@@ -315,7 +410,14 @@ describe('neoMqtt', () => {
     const zonesBefore = state.get('RemoteZoneInfo')
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -323,7 +425,10 @@ describe('neoMqtt', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     const wiped = {
-      event: { ...fullStatusPush.event, RemoteZoneInfo: fullStatusPush.event.RemoteZoneInfo.map((z: Record<string, unknown>) => ({ ...z, NV_Exists: false })) },
+      event: {
+        ...fullStatusPush.event,
+        RemoteZoneInfo: fullStatusPush.event.RemoteZoneInfo.map((z: Record<string, unknown>) => ({ ...z, NV_Exists: false })),
+      },
       wcFirmware: fullStatusPush.wcFirmware,
     }
     const base = `actron-cloud/${CONNECTION_DETAILS.UserId}/neo/${SERIAL.toLowerCase()}/mwc`
@@ -337,7 +442,14 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]
@@ -357,7 +469,14 @@ describe('neoMqtt', () => {
     const auth = buildAuth(async () => `token-${++n}`)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: auth as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: auth as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     expect(impl.mock.calls[0][1].password).toBe('token-1')
@@ -372,7 +491,14 @@ describe('neoMqtt', () => {
   it('uses a fresh client id and a clean session on every connect', async () => {
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('close')
@@ -389,7 +515,14 @@ describe('neoMqtt', () => {
   it('stop() disconnects and clears timers', async () => {
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -407,7 +540,14 @@ describe('neoMqtt', () => {
   it('resets the backoff on stop(), so a stop/start cycle does not inherit a stale 60s wait', async () => {
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     // Fail a few times to grow the backoff well past its initial 0.5s.
@@ -437,7 +577,14 @@ describe('neoMqtt', () => {
     // that warning is the only signal the user gets.
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state: new NeoState(), serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -458,7 +605,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -469,7 +623,11 @@ describe('neoMqtt', () => {
 
     const base = `actron-cloud/${CONNECTION_DETAILS.UserId}/neo/${SERIAL.toLowerCase()}/mwc`
     clients[0].emit('message', `${base}/status-change`, Buffer.from(JSON.stringify({
-      event: { 'type': 'status-change-broadcast', 'SomeUnreadSubtree': { LiveTemp_oC: 21 }, 'UserAirconSettings.isOn': true },
+      event: {
+        'type': 'status-change-broadcast',
+        'SomeUnreadSubtree': { LiveTemp_oC: 21 },
+        'UserAirconSettings.isOn': true,
+      },
     })))
     await vi.advanceTimersByTimeAsync(0)
 
@@ -486,7 +644,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -499,7 +664,9 @@ describe('neoMqtt', () => {
     clients[0].emit('message', `${base}/status-change`, Buffer.from(JSON.stringify({
       event: {
         'type': 'status-change-broadcast',
-        'NV_Schedule.Events': [{ Enabled: true }],
+        'NV_Schedule.Events': [
+          { Enabled: true },
+        ],
         'UserAirconSettings.TemperatureSetpoint_Cool_oC': 23.5,
       },
     })))
@@ -519,7 +686,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -557,7 +731,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     clients[0].emit('connect')
@@ -586,7 +767,14 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     const rest = buildRest(undefined, 'testuser@example.com')
     const { impl, calls } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     expect(calls[0].opts.username).toBe('testuser@example.com')
@@ -597,7 +785,15 @@ describe('neoMqtt', () => {
     const state = new NeoState()
     const rest = buildRest()
     const { impl, calls } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, userEmail: 'custom@example.com', connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      userEmail: 'custom@example.com',
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     expect(calls[0].opts.username).toBe('custom@example.com')
@@ -609,7 +805,14 @@ describe('neoMqtt', () => {
     state.replace(restStatus.lastKnownState)
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({ rest: rest as never, auth: buildAuth() as never, state, serial: SERIAL, log, connectImpl: impl as never })
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
 
     await mqtt.start()
     const client = clients[0]

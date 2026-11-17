@@ -9,9 +9,18 @@ const realFixture = JSON.parse(readFileSync('test/fixtures/rest-status.json', 'u
 
 function baseTree() {
   return {
-    UserAirconSettings: { isOn: true, Mode: 'COOL', FanMode: 'LOW', EnabledZones: [] },
+    UserAirconSettings: {
+      isOn: true,
+      Mode: 'COOL',
+      FanMode: 'LOW',
+      EnabledZones: [],
+    },
     MasterInfo: { LiveTemp_oC: 24, LiveHumidity_pc: 45, LiveOutdoorTemp_oC: 18 },
-    LiveAircon: { CompressorMode: 'COOL', AmRunningFan: true, OutdoorUnit: { AmbientSensErr: false } },
+    LiveAircon: {
+      CompressorMode: 'COOL',
+      AmRunningFan: true,
+      OutdoorUnit: { AmbientSensErr: false },
+    },
     RemoteZoneInfo: [],
     AirconSystem: {},
   }
@@ -47,9 +56,16 @@ describe('deriveCapabilities', () => {
 
   it('bitmap 15 with NV_AutoFanEnabled true reports all four speeds', () => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_SupportedFanModes: 15, NV_AutoFanEnabled: true } } as never
+    tree.AirconSystem = {
+      IndoorUnit: { NV_SupportedFanModes: 15, NV_AutoFanEnabled: true },
+    } as never
     const caps = deriveCapabilities(stateFrom(tree))
-    expect(caps.fanSpeeds).toEqual([FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH, FanMode.AUTO])
+    expect(caps.fanSpeeds).toEqual([
+      FanMode.LOW,
+      FanMode.MEDIUM,
+      FanMode.HIGH,
+      FanMode.AUTO,
+    ])
     expect(caps.supportsAutoFan).toBe(true)
   })
 
@@ -60,14 +76,18 @@ describe('deriveCapabilities', () => {
     ['garbage (non-numeric)', 'nonsense'],
   ])('falls back to [LOW, MED, HIGH] when the bitmap is %s', (_label, value) => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_SupportedFanModes: value } } as never
+    tree.AirconSystem = {
+      IndoorUnit: { NV_SupportedFanModes: value },
+    } as never
     const caps = deriveCapabilities(stateFrom(tree))
     expect(caps.fanSpeeds).toEqual([FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH])
   })
 
   it('falls back to [LOW, MED, HIGH] when the bitmap is AUTO-only and NV_AutoFanEnabled is false, even with no FanMode to union in (regression: fanSpeeds must never end up empty)', () => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_SupportedFanModes: 8, NV_AutoFanEnabled: false } } as never
+    tree.AirconSystem = {
+      IndoorUnit: { NV_SupportedFanModes: 8, NV_AutoFanEnabled: false },
+    } as never
     delete (tree.UserAirconSettings as Record<string, unknown>).FanMode
     const caps = deriveCapabilities(stateFrom(tree))
     expect(caps.fanSpeeds).toEqual([FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH])
@@ -76,7 +96,9 @@ describe('deriveCapabilities', () => {
 
   it('retains AUTO for a valid AUTO-only bitmap when NV_AutoFanEnabled is true', () => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_SupportedFanModes: 8, NV_AutoFanEnabled: true } } as never
+    tree.AirconSystem = {
+      IndoorUnit: { NV_SupportedFanModes: 8, NV_AutoFanEnabled: true },
+    } as never
     delete (tree.UserAirconSettings as Record<string, unknown>).FanMode
     const caps = deriveCapabilities(stateFrom(tree))
     expect(caps.fanSpeeds).toEqual([FanMode.AUTO])
@@ -85,7 +107,9 @@ describe('deriveCapabilities', () => {
 
   it('excludes AUTO when NV_AutoFanEnabled is true but the AUTO bit is unset — the flag gates, it does not override', () => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_SupportedFanModes: 7, NV_AutoFanEnabled: true } } as never // 7 = LOW|MED|HIGH, no AUTO bit
+    tree.AirconSystem = {
+      IndoorUnit: { NV_SupportedFanModes: 7, NV_AutoFanEnabled: true },
+    } as never // 7 = LOW|MED|HIGH, no AUTO bit
     const caps = deriveCapabilities(stateFrom(tree))
     expect(caps.fanSpeeds).toEqual([FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH])
     expect(caps.supportsAutoFan).toBe(false)
@@ -93,7 +117,9 @@ describe('deriveCapabilities', () => {
 
   it('unions in the currently-running speed even when the bitmap omits it', () => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_SupportedFanModes: 1, NV_AutoFanEnabled: false } } as never // bitmap: LOW only
+    tree.AirconSystem = {
+      IndoorUnit: { NV_SupportedFanModes: 1, NV_AutoFanEnabled: false },
+    } as never // bitmap: LOW only
     tree.UserAirconSettings.FanMode = 'HIGH+CONT'
     const caps = deriveCapabilities(stateFrom(tree))
     expect(caps.fanSpeeds).toEqual([FanMode.LOW, FanMode.HIGH])
@@ -114,10 +140,15 @@ describe('deriveCapabilities', () => {
 
   it('model prefers MasterWCModel, falling back to the indoor unit model', () => {
     const tree = baseTree()
-    tree.AirconSystem = { IndoorUnit: { NV_ModelNumber: 'EVA150S' } } as never
+    tree.AirconSystem = {
+      IndoorUnit: { NV_ModelNumber: 'EVA150S' },
+    } as never
     expect(deriveCapabilities(stateFrom(tree)).model).toBe('EVA150S')
 
-    tree.AirconSystem = { MasterWCModel: 'NTW-1000', IndoorUnit: { NV_ModelNumber: 'EVA150S' } } as never
+    tree.AirconSystem = {
+      MasterWCModel: 'NTW-1000',
+      IndoorUnit: { NV_ModelNumber: 'EVA150S' },
+    } as never
     expect(deriveCapabilities(stateFrom(tree)).model).toBe('NTW-1000')
   })
 
@@ -147,28 +178,63 @@ describe('deriveModeSupport', () => {
     const state = new NeoState()
     state.replace(StatusResponseSchema.parse(realFixture).lastKnownState)
 
-    expect(deriveModeSupport(state)).toEqual({ cool: true, heat: true, auto: true, fan: true, dry: false })
+    expect(deriveModeSupport(state)).toEqual({
+      cool: true,
+      heat: true,
+      auto: true,
+      fan: true,
+      dry: false,
+    })
   })
 
   it('assumes the four long-standing modes (but not dry) when the unit reports no ModeSupport', () => {
     expect(deriveModeSupport(stateFrom(baseTree())))
-      .toEqual({ cool: true, heat: true, auto: true, fan: true, dry: false })
+      .toEqual({
+        cool: true,
+        heat: true,
+        auto: true,
+        fan: true,
+        dry: false,
+      })
   })
 
   it('honours a mode the unit says it does not have', () => {
     const tree = baseTree()
-    ;(tree.UserAirconSettings as Record<string, unknown>).ModeSupport = { Cool: true, Heat: false, Auto: false, Fan: false, Dry: false }
+    ;(tree.UserAirconSettings as Record<string, unknown>).ModeSupport = {
+      Cool: true,
+      Heat: false,
+      Auto: false,
+      Fan: false,
+      Dry: false,
+    }
 
-    expect(deriveModeSupport(stateFrom(tree))).toEqual({ cool: true, heat: false, auto: false, fan: false, dry: false })
+    expect(deriveModeSupport(stateFrom(tree))).toEqual({
+      cool: true,
+      heat: false,
+      auto: false,
+      fan: false,
+      dry: false,
+    })
   })
 
   it('reports an all-false thermostat mode set honestly instead of rewriting it', () => {
     // HAP does need a non-empty validValues list, but that compromise belongs to
     // MasterAccessory — capabilities must not tell every other consumer the unit can cool.
     const tree = baseTree()
-    ;(tree.UserAirconSettings as Record<string, unknown>).ModeSupport = { Cool: false, Heat: false, Auto: false, Fan: true }
+    ;(tree.UserAirconSettings as Record<string, unknown>).ModeSupport = {
+      Cool: false,
+      Heat: false,
+      Auto: false,
+      Fan: true,
+    }
 
-    expect(deriveModeSupport(stateFrom(tree))).toEqual({ cool: false, heat: false, auto: false, fan: true, dry: false })
+    expect(deriveModeSupport(stateFrom(tree))).toEqual({
+      cool: false,
+      heat: false,
+      auto: false,
+      fan: true,
+      dry: false,
+    })
   })
 
   it('falls back per field, so a partial ModeSupport does not lose the modes it omits', () => {
@@ -176,6 +242,12 @@ describe('deriveModeSupport', () => {
     ;(tree.UserAirconSettings as Record<string, unknown>).ModeSupport = { Cool: false, Dry: true }
 
     expect(deriveModeSupport(stateFrom(tree)))
-      .toEqual({ cool: false, heat: true, auto: true, fan: true, dry: true })
+      .toEqual({
+        cool: false,
+        heat: true,
+        auto: true,
+        fan: true,
+        dry: true,
+      })
   })
 })

@@ -43,7 +43,16 @@ describe('parseConfig', () => {
 
     expect(cfg.name).toBe('x')
     expect(cfg.refreshIntervalMs).toBe(60_000)
-    for (const removed of ['pushEnabled', 'commandDebounceMs', 'setpointDebounceMs', 'zonesPushMaster', 'maxCoolingTemp', 'minCoolingTemp', 'maxHeatingTemp', 'minHeatingTemp'])
+    for (const removed of [
+      'pushEnabled',
+      'commandDebounceMs',
+      'setpointDebounceMs',
+      'zonesPushMaster',
+      'maxCoolingTemp',
+      'minCoolingTemp',
+      'maxHeatingTemp',
+      'minHeatingTemp',
+    ])
       expect(Object.hasOwn(cfg, removed)).toBe(true) // passed through untouched by looseObject, never read
   })
 
@@ -82,6 +91,11 @@ describe('config.schema.json form visibility', () => {
     const visible = Object.entries(props)
       .filter(([, v]) => (v as { condition?: unknown }).condition === undefined)
       .map(([k]) => k)
-    expect(visible).toEqual(['name', 'zonesAsHeaterCoolers', 'refreshInterval', 'debug'])
+    expect(visible).toEqual([
+      'name',
+      'zonesAsHeaterCoolers',
+      'refreshInterval',
+      'debug',
+    ])
   })
 })

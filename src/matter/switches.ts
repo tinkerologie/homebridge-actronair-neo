@@ -107,7 +107,9 @@ export function buildSwitchMatterAccessory(
     accessory,
     update: (changed: Set<string>) => {
       if (changed.has('*') || changed.has(path)) {
-        platform.api.matter?.updateAccessoryState(uuid, 'onOff', { onOff: getOn() }).catch((err) => {
+        platform.api.matter?.updateAccessoryState(uuid, 'onOff', {
+          onOff: getOn(),
+        }).catch((err) => {
           platform.log.debug(`Failed to update Matter ${mode} switch state: ${(err as Error).message}`)
         })
       }

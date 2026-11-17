@@ -58,7 +58,9 @@ function makePlatform(cfgOverrides: Record<string, unknown> = {}) {
       hap: {
         Service: {},
         Characteristic: {},
-        uuid: { generate: (s: string) => `uuid-${s}` },
+        uuid: {
+          generate: (s: string) => `uuid-${s}`,
+        },
       },
       isMatterAvailable: () => true,
       isMatterEnabled: () => true,
@@ -69,7 +71,12 @@ function makePlatform(cfgOverrides: Record<string, unknown> = {}) {
     serial: 'NEO123456',
     capabilities: {
       model: 'ActronAir Neo Test Model',
-      modes: { auto: true, heat: true, cool: true, fan: true },
+      modes: {
+        auto: true,
+        heat: true,
+        cool: true,
+        fan: true,
+      },
       fanSpeeds: ['LOW', 'MED', 'HIGH', 'AUTO'],
       supportsTurbo: true,
       supportsVft: false,
@@ -309,7 +316,9 @@ describe('matter layer', () => {
       expect(matterApi.updateAccessoryState).toHaveBeenCalledWith(
         accessory.UUID,
         'thermostat',
-        expect.objectContaining({ systemMode: expect.any(Number) }),
+        expect.objectContaining({
+          systemMode: expect.any(Number),
+        }),
       )
 
       // Turn On (e.g. Auto = 1)
@@ -348,7 +357,9 @@ describe('matter layer', () => {
       expect(matterApi.updateAccessoryState).toHaveBeenCalledWith(
         binding.uuid,
         'onOff',
-        expect.objectContaining({ onOff: expect.any(Boolean) }),
+        expect.objectContaining({
+          onOff: expect.any(Boolean),
+        }),
       )
     })
 
@@ -512,7 +523,12 @@ describe('matter layer', () => {
       const { platform } = makePlatform()
       const kinds = [
         { id: 'master', displayName: 'AC', kind: 'master' as const },
-        { id: 'zone-0', displayName: 'Zone 1', kind: 'zone' as const, zoneIndex: 0 },
+        {
+          id: 'zone-0',
+          displayName: 'Zone 1',
+          kind: 'zone' as const,
+          zoneIndex: 0,
+        },
         { id: 'away', displayName: 'Away', kind: 'away' as const },
         { id: 'quiet', displayName: 'Quiet', kind: 'quiet' as const },
         { id: 'cont', displayName: 'Cont', kind: 'continuousFan' as const },

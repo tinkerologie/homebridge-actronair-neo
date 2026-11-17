@@ -90,7 +90,9 @@ export class AfterHoursAccessory implements DisposableAccessory {
   }
 
   getActive(): CharacteristicValue {
-    return this.platform.state.get<boolean>(ENABLED_PATH) ? 1 : 0
+    return this.platform.state.get<boolean>(ENABLED_PATH)
+      ? 1
+      : 0
   }
 
   getDuration(): CharacteristicValue {

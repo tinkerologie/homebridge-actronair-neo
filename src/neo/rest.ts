@@ -92,7 +92,10 @@ export class NeoRest {
     return this.request(
       `api/v0/client/ac-systems/cmds/send?serial=${encodeURIComponent(serial)}`,
       CommandResponseSchema,
-      { method: 'POST', body: JSON.stringify(command) },
+      {
+        method: 'POST',
+        body: JSON.stringify(command),
+      },
     )
   }
 
@@ -120,7 +123,9 @@ export class NeoRest {
           headers: {
             Authorization: `Bearer ${token}`,
             Accept: 'application/json',
-            ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(init.body
+              ? { 'Content-Type': 'application/json' }
+              : {}),
           },
           body: init.body,
           signal: AbortSignal.timeout(this.timeoutMs),

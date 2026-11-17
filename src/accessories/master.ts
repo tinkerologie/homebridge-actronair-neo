@@ -49,11 +49,16 @@ function computeFanBands(speeds: FanMode[]): FanBand[] {
   // Defense in depth: deriveCapabilities() never returns an empty fanSpeeds list, but a
   // characteristic handler crashing on the fan slider is bad enough that this can't rely
   // solely on the caller upholding that invariant.
-  const safeSpeeds = speeds.length ? speeds : [FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH]
+  const safeSpeeds = speeds.length
+    ? speeds
+    : [FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH]
   const hasAuto = safeSpeeds.includes(FanMode.AUTO)
   const base: FanMode[] = safeSpeeds.filter(s => s !== FanMode.AUTO)
   const ceiling = hasAuto ? 90 : 100
-  const bands = base.map((speed, i) => ({ speed, max: Math.round((ceiling * (i + 1)) / base.length) }))
+  const bands = base.map((speed, i) => ({
+    speed,
+    max: Math.round((ceiling * (i + 1)) / base.length),
+  }))
   if (hasAuto)
     bands.push({ speed: FanMode.AUTO, max: 100 })
   return bands
@@ -159,9 +164,15 @@ export class MasterAccessory implements DisposableAccessory {
     const target = this.platform.Characteristic.TargetHeaterCoolerState
     const modes = this.platform.capabilities?.modes
     const reportedTargets = [
-      ...(modes?.auto ?? true ? [target.AUTO] : []),
-      ...(modes?.heat ?? true ? [target.HEAT] : []),
-      ...(modes?.cool ?? true ? [target.COOL] : []),
+      ...(modes?.auto ?? true
+        ? [target.AUTO]
+        : []),
+      ...(modes?.heat ?? true
+        ? [target.HEAT]
+        : []),
+      ...(modes?.cool ?? true
+        ? [target.COOL]
+        : []),
     ]
     // HAP needs at least one valid value or the characteristic — and with it the thermostat —
     // is unusable, so a unit reporting no heating, cooling or auto at all (a fan-only head)
@@ -173,7 +184,9 @@ export class MasterAccessory implements DisposableAccessory {
         'This unit reports no cooling, heating or auto mode. HomeKit cannot show a thermostat without one, so all three are being offered — expect the unit to ignore them.',
       )
     }
-    this.climateTargets = reportedTargets.length ? reportedTargets : [target.AUTO, target.HEAT, target.COOL]
+    this.climateTargets = reportedTargets.length
+      ? reportedTargets
+      : [target.AUTO, target.HEAT, target.COOL]
     this.lastClimateTarget = this.climateTargets[0]
 
     this.hvacService.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
@@ -190,7 +203,10 @@ export class MasterAccessory implements DisposableAccessory {
     // Device-reported limits win over the built-in fallback — see resolveSetpointBounds().
     const heatBounds = resolveSetpointBounds(this.platform.state, 'heat')
     const coolBounds = resolveSetpointBounds(this.platform.state, 'cool')
-    this.heatBounds = { min: Math.max(10, heatBounds.min), max: heatBounds.max }
+    this.heatBounds = {
+      min: Math.max(10, heatBounds.min),
+      max: heatBounds.max,
+    }
     this.coolBounds = coolBounds
 
     // Both characteristics start at a HAP default below these minimums (0 for heating, 10 for
@@ -349,12 +365,16 @@ export class MasterAccessory implements DisposableAccessory {
 
   async setPowerState(value: CharacteristicValue): Promise<void> {
     this.checkHvacComms()
-    assertCommandSuccess(this.platform, await this.platform.commands.run(value === 1 ? NeoCommand.ON : NeoCommand.OFF))
+    assertCommandSuccess(this.platform, await this.platform.commands.run(value === 1
+      ? NeoCommand.ON
+      : NeoCommand.OFF))
     this.platform.log.debug('Set Master Power State -> ', value)
   }
 
   getPowerState(): CharacteristicValue {
-    return this.platform.state.get<boolean>(WATCHED.power) ? 1 : 0
+    return this.platform.state.get<boolean>(WATCHED.power)
+      ? 1
+      : 0
   }
 
   getCurrentCompressorMode(): CharacteristicValue {
@@ -447,7 +467,9 @@ export class MasterAccessory implements DisposableAccessory {
     const { INACTIVE, IDLE, BLOWING_AIR } = this.platform.Characteristic.CurrentFanState
     if (this.getFanOnlyActive() !== this.platform.Characteristic.Active.ACTIVE)
       return INACTIVE
-    return this.platform.state.get<boolean>(WATCHED.fanRunning) ? BLOWING_AIR : IDLE
+    return this.platform.state.get<boolean>(WATCHED.fanRunning)
+      ? BLOWING_AIR
+      : IDLE
   }
 
   /**
@@ -456,7 +478,9 @@ export class MasterAccessory implements DisposableAccessory {
    */
   getFilterChangeIndication(): CharacteristicValue {
     const { FILTER_OK, CHANGE_FILTER } = this.platform.Characteristic.FilterChangeIndication
-    return this.platform.state.get<boolean>(WATCHED.cleanFilter) === true ? CHANGE_FILTER : FILTER_OK
+    return this.platform.state.get<boolean>(WATCHED.cleanFilter) === true
+      ? CHANGE_FILTER
+      : FILTER_OK
   }
 
   /**

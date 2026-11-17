@@ -58,7 +58,9 @@ const POLL_FAILURE_WARN_AFTER = 3
 function withDebugLogging(log: Logging): Logging {
   return new Proxy(log, {
     get: (target, prop, receiver) =>
-      prop === 'debug' ? target.info.bind(target) : Reflect.get(target, prop, receiver),
+      prop === 'debug'
+        ? target.info.bind(target)
+        : Reflect.get(target, prop, receiver),
   })
 }
 
@@ -118,7 +120,9 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     this.Service = api.hap.Service
     this.Characteristic = api.hap.Characteristic
     this.cfg = parseConfig(config)
-    this.log = this.cfg.debug ? withDebugLogging(log) : log
+    this.log = this.cfg.debug
+      ? withDebugLogging(log)
+      : log
 
     this.isMatterSupported = Boolean(
       this.api.isMatterAvailable?.() && this.api.isMatterEnabled?.() && this.api.matter,
@@ -225,11 +229,13 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.log.info(
         `Detected ${this.capabilities.model}`
         + ` (indoor: ${this.capabilities.indoorModel ?? 'unknown'}, outdoor: ${this.capabilities.outdoorFamily ?? 'unknown'}`
-        + `${this.capabilities.capacityKw ? `, ${this.capabilities.capacityKw}kW` : ''}).`
-        + ` Modes: ${Object.entries(this.capabilities.modes).filter(([, on]) => on).map(([mode]) => mode).join(', ')}.`
-        + ` Fan speeds: ${this.capabilities.fanSpeeds.join(', ')}.`
-        + ` Turbo: ${this.capabilities.supportsTurbo}, VFT: ${this.capabilities.supportsVft},`
-        + ` quiet mode: ${this.capabilities.quietModeAvailable}, outdoor temp: ${this.capabilities.outdoorTempUsable}.`,
+        + `${this.capabilities.capacityKw
+          ? `, ${this.capabilities.capacityKw}kW`
+          : ''}).`
+          + ` Modes: ${Object.entries(this.capabilities.modes).filter(([, on]) => on).map(([mode]) => mode).join(', ')}.`
+          + ` Fan speeds: ${this.capabilities.fanSpeeds.join(', ')}.`
+          + ` Turbo: ${this.capabilities.supportsTurbo}, VFT: ${this.capabilities.supportsVft},`
+          + ` quiet mode: ${this.capabilities.quietModeAvailable}, outdoor temp: ${this.capabilities.outdoorTempUsable}.`,
       )
 
       this.commands = new CommandQueue({
@@ -243,11 +249,17 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       discovered = [
         // Sanitised like a zone name: `name` is free text in config.json, and it now seeds the
         // fan service's ConfiguredName as well as its own — HAP validates both.
-        { id: this.serial, displayName: sanitizeAccessoryName(this.cfg.name, 'ActronAir Neo'), kind: 'master' },
+        {
+          id: this.serial,
+          displayName: sanitizeAccessoryName(this.cfg.name, 'ActronAir Neo'),
+          kind: 'master',
+        },
         { id: 'neo-away-mode', displayName: 'Away Mode', kind: 'away' },
         // Only registered when the unit reports QuietModeEnabled — see NeoCapabilities.
         ...(this.capabilities.quietModeAvailable
-          ? [{ id: 'neo-quiet-mode', displayName: 'Quiet Mode', kind: 'quiet' as const }]
+          ? [
+              { id: 'neo-quiet-mode', displayName: 'Quiet Mode', kind: 'quiet' as const },
+            ]
           : []),
         { id: 'neo-continuous-fan-mode', displayName: 'Continuous Mode', kind: 'continuousFan' },
         { id: 'neo-after-hours-mode', displayName: 'After Hours', kind: 'afterHours' },
@@ -255,12 +267,16 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         // A sentinel (3000), sensor error, or implausible value would otherwise permanently
         // stick an invalid CurrentTemperature accessory in HomeKit.
         ...(this.capabilities.outdoorTempUsable
-          ? [{ id: 'neo-outdoor-temp', displayName: 'Outdoor Temperature', kind: 'outdoorTemp' as const }]
+          ? [
+              { id: 'neo-outdoor-temp', displayName: 'Outdoor Temperature', kind: 'outdoorTemp' as const },
+            ]
           : []),
         // Only registered when the unit reports TurboMode.Supported — exposing a control
         // the hardware can't honour would give a switch that silently does nothing.
         ...(this.capabilities.supportsTurbo
-          ? [{ id: 'neo-turbo-mode', displayName: 'Turbo Mode', kind: 'turbo' as const }]
+          ? [
+              { id: 'neo-turbo-mode', displayName: 'Turbo Mode', kind: 'turbo' as const },
+            ]
           : []),
         ...status.lastKnownState.RemoteZoneInfo
           .map((zone, zoneIndex) => ({ zone, zoneIndex }))

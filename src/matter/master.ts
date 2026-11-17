@@ -102,7 +102,9 @@ export function buildMasterMatterAccessory(
   }
 
   const liveTemp = getUsableMasterTemp(platform.state)
-  const initialTemp = liveTemp !== undefined ? Math.round(liveTemp * 100) : 2100
+  const initialTemp = liveTemp !== undefined
+    ? Math.round(liveTemp * 100)
+    : 2100
   const initialHeatSetpoint = Math.round((platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Heat_oC') ?? 20) * 100)
   const initialCoolSetpoint = Math.round((platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Cool_oC') ?? 24) * 100)
 
@@ -302,7 +304,9 @@ export function buildMasterMatterAccessory(
       }
       if (all || changed.has('MasterInfo.LiveTemp_oC')) {
         const temp = getUsableMasterTemp(platform.state)
-        thermostatUpdate.localTemperature = temp !== undefined ? Math.round(temp * 100) : null
+        thermostatUpdate.localTemperature = temp !== undefined
+          ? Math.round(temp * 100)
+          : null
       }
 
       if (Object.keys(thermostatUpdate).length > 0) {
@@ -323,7 +327,11 @@ export function buildMasterMatterAccessory(
         platform.api.matter?.updateAccessoryState(
           uuid,
           'relativeHumidityMeasurement',
-          { measuredValue: hum !== undefined ? Math.round(hum * 100) : null },
+          {
+            measuredValue: hum !== undefined
+              ? Math.round(hum * 100)
+              : null,
+          },
           'humidity',
         ).catch((err) => {
           platform.log.debug(`Failed to update Matter master humidity state: ${(err as Error).message}`)

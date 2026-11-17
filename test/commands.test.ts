@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { CommandQueue } from '../src/neo/commands.js'
 import { CommandResult, NeoCommand } from '../src/neo/types.js'
 
-const logMocks = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+const logMocks = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}
 const log = logMocks as never
 
 function make(sendCommand = vi.fn(async () => ({ type: 'ack' }))) {
@@ -16,7 +21,13 @@ function make(sendCommand = vi.fn(async () => ({ type: 'ack' }))) {
   return { queue, sendCommand }
 }
 
-const fanStatus = (fanMode: string) => ({ lastKnownState: { UserAirconSettings: { FanMode: fanMode } } })
+function fanStatus(fanMode: string) {
+  return {
+    lastKnownState: {
+      UserAirconSettings: { FanMode: fanMode },
+    },
+  }
+}
 
 function makeWithFanVerify(fanModeSequence: string[], sendCommand = vi.fn(async () => ({ type: 'ack' }))) {
   let call = 0
@@ -83,9 +94,15 @@ describe('commandQueue', () => {
     await queue.run(NeoCommand.AFTER_HOURS_ON)
     await queue.run(NeoCommand.AFTER_HOURS_DURATION, { duration: 240 })
     await queue.run(NeoCommand.TURBO_MODE_ON)
-    expect(sendCommand).toHaveBeenNthCalledWith(1, 'neo000000', { command: { 'UserAirconSettings.AfterHours.Enabled': true, 'type': 'set-settings' } })
-    expect(sendCommand).toHaveBeenNthCalledWith(2, 'neo000000', { command: { 'UserAirconSettings.AfterHours.Duration': 240, 'type': 'set-settings' } })
-    expect(sendCommand).toHaveBeenNthCalledWith(3, 'neo000000', { command: { 'UserAirconSettings.TurboMode.Enabled': true, 'type': 'set-settings' } })
+    expect(sendCommand).toHaveBeenNthCalledWith(1, 'neo000000', {
+      command: { 'UserAirconSettings.AfterHours.Enabled': true, 'type': 'set-settings' },
+    })
+    expect(sendCommand).toHaveBeenNthCalledWith(2, 'neo000000', {
+      command: { 'UserAirconSettings.AfterHours.Duration': 240, 'type': 'set-settings' },
+    })
+    expect(sendCommand).toHaveBeenNthCalledWith(3, 'neo000000', {
+      command: { 'UserAirconSettings.TurboMode.Enabled': true, 'type': 'set-settings' },
+    })
   })
 
   it('coalesces a burst on one key into a single send', async () => {
@@ -97,7 +114,9 @@ describe('commandQueue', () => {
     ])
     expect(sendCommand).toHaveBeenCalledTimes(1)
     expect(results).toEqual([CommandResult.SUCCESS, CommandResult.SUCCESS, CommandResult.SUCCESS])
-    expect(sendCommand.mock.calls[0][1]).toMatchObject({ command: { 'UserAirconSettings.isOn': true } })
+    expect(sendCommand.mock.calls[0][1]).toMatchObject({
+      command: { 'UserAirconSettings.isOn': true },
+    })
   })
 
   it('merges concurrent zone toggles into one EnabledZones array', async () => {
@@ -109,7 +128,9 @@ describe('commandQueue', () => {
     ])
     expect(sendCommand).toHaveBeenCalledTimes(1)
     expect(sendCommand.mock.calls[0][1]).toMatchObject({
-      command: { 'UserAirconSettings.EnabledZones': [true, false, true, false] },
+      command: {
+        'UserAirconSettings.EnabledZones': [true, false, true, false],
+      },
     })
   })
 
@@ -120,7 +141,9 @@ describe('commandQueue', () => {
     queue.syncEnabledZones([false, false])
     await pending
     expect(sendCommand.mock.calls[0][1]).toMatchObject({
-      command: { 'UserAirconSettings.EnabledZones': [false, true] },
+      command: {
+        'UserAirconSettings.EnabledZones': [false, true],
+      },
     })
   })
 
@@ -128,7 +151,9 @@ describe('commandQueue', () => {
     const { queue, sendCommand } = make()
     await queue.run(NeoCommand.ZONE_ENABLE, { zoneIndex: 2 })
     expect(sendCommand.mock.calls[0][1]).toMatchObject({
-      command: { 'UserAirconSettings.EnabledZones': [false, false, true] },
+      command: {
+        'UserAirconSettings.EnabledZones': [false, false, true],
+      },
     })
   })
 
@@ -153,7 +178,9 @@ describe('commandQueue', () => {
     await pending
 
     expect(sendCommand.mock.calls[0][1]).toMatchObject({
-      command: { 'UserAirconSettings.EnabledZones': [false, true] },
+      command: {
+        'UserAirconSettings.EnabledZones': [false, true],
+      },
     })
   })
 

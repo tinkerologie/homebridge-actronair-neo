@@ -26,7 +26,9 @@ function makeApi(options: { matterEnabled?: boolean } = {}) {
   const handlers: Record<string, () => void> = {}
   const matterMock = options.matterEnabled
     ? {
-        uuid: { generate: (s: string) => `matter-uuid-${s}` },
+        uuid: {
+          generate: (s: string) => `matter-uuid-${s}`,
+        },
         deviceTypes: {
           Thermostat: { name: 'Thermostat' },
           Fan: { name: 'Fan' },
@@ -43,8 +45,17 @@ function makeApi(options: { matterEnabled?: boolean } = {}) {
     : undefined
 
   return {
-    hap: { Service: {}, Characteristic: {}, uuid: { generate: (s: string) => `uuid-${s}` }, HapStatusError: class {} },
-    user: { storagePath: () => '/tmp/hb' },
+    hap: {
+      Service: {},
+      Characteristic: {},
+      uuid: {
+        generate: (s: string) => `uuid-${s}`,
+      },
+      HapStatusError: class {},
+    },
+    user: {
+      storagePath: () => '/tmp/hb',
+    },
     on: (event: string, cb: () => void) => { handlers[event] = cb },
     platformAccessory: class {
       context: Record<string, unknown> = {}
@@ -82,7 +93,12 @@ afterEach(() => {
 })
 
 describe('actronAirNeoPlatform', () => {
-  it.each(['rediscovery', 'failed rebuild', 'removal', 'shutdown'])('manages zone listeners on %s', async (action) => {
+  it.each([
+    'rediscovery',
+    'failed rebuild',
+    'removal',
+    'shutdown',
+  ])('manages zone listeners on %s', async (action) => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
     const updated = vi.fn()
@@ -90,7 +106,10 @@ describe('actronAirNeoPlatform', () => {
       this.dispose = platform.state.onChange(() => updated(index))
     } as never)
     let status = structuredClone(restStatus)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => status } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => status,
+    } as never)
     await p.discoverDevices()
     if (action === 'rediscovery') {
       await p.discoverDevices()
@@ -113,7 +132,9 @@ describe('actronAirNeoPlatform', () => {
     }
     updated.mockClear()
     p.state.applyDelta({ 'UserAirconSettings.isOn': !status.lastKnownState.UserAirconSettings.isOn })
-    expect(updated.mock.calls.filter(([index]) => index === 0)).toHaveLength(['rediscovery', 'failed rebuild'].includes(action) ? 1 : 0)
+    expect(updated.mock.calls.filter(([index]) => index === 0)).toHaveLength(['rediscovery', 'failed rebuild'].includes(action)
+      ? 1
+      : 0)
     api.handlers.shutdown()
   })
 
@@ -125,12 +146,21 @@ describe('actronAirNeoPlatform', () => {
     const pending = new Promise((resolve) => {
       release = resolve
     })
-    const getStatus = vi.fn(async () => stage === 'status' ? pending : restStatus)
-    p.injectForTest({ getSystems: async () => stage === 'systems' ? pending : systems, getStatus } as never)
+    const getStatus = vi.fn(async () => stage === 'status'
+      ? pending
+      : restStatus)
+    p.injectForTest({
+      getSystems: async () => stage === 'systems'
+        ? pending
+        : systems,
+      getStatus,
+    } as never)
     const discovery = p.discoverDevices()
     await Promise.resolve()
     api.handlers.shutdown()
-    release(stage === 'systems' ? systems : restStatus)
+    release(stage === 'systems'
+      ? systems
+      : restStatus)
     await discovery
     expect(p.commands).toBeUndefined()
     expect(NeoMqtt).not.toHaveBeenCalled()
@@ -147,10 +177,17 @@ describe('actronAirNeoPlatform', () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
     const getSystems = vi.fn(async () => systems)
-    p.injectForTest({ getSystems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems,
+      getStatus: async () => restStatus,
+    } as never)
     p.state.replace(restStatus.lastKnownState)
     const update = vi.fn()
-    p.matterBindings.set('binding', { uuid: 'binding', accessory: { displayName: 'Binding' } as never, update })
+    p.matterBindings.set('binding', {
+      uuid: 'binding',
+      accessory: { displayName: 'Binding' } as never,
+      update,
+    })
     api.handlers.shutdown()
     await p.discoverDevices()
     p.state.applyDelta({ 'UserAirconSettings.isOn': !restStatus.lastKnownState.UserAirconSettings.isOn })
@@ -223,7 +260,9 @@ describe('actronAirNeoPlatform', () => {
       const service = {
         name,
         testCharacteristic: () => true,
-        getCharacteristic: () => ({ get value() { return service.name } }),
+        getCharacteristic: () => ({
+          get value() { return service.name },
+        }),
         updateCharacteristic: (_id: unknown, value: string) => { service.name = value },
       }
       return service
@@ -239,7 +278,10 @@ describe('actronAirNeoPlatform', () => {
       context: {},
       services: [stale, fan, staleLonger],
     } as never)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
 
     await p.discoverDevices()
 
@@ -255,16 +297,23 @@ describe('actronAirNeoPlatform', () => {
     const service = {
       name: `${zone0.NV_Title} Filter`,
       testCharacteristic: () => true,
-      getCharacteristic: () => ({ get value() { return service.name } }),
+      getCharacteristic: () => ({
+        get value() { return service.name },
+      }),
       updateCharacteristic: (_id: unknown, value: string) => { service.name = value },
     }
     p.configureAccessory({
       UUID: 'uuid-zone-0',
       displayName: zone0.NV_Title,
-      context: { device: { kind: 'zone', zoneIndex: 0, id: 'zone-0' } },
+      context: {
+        device: { kind: 'zone', zoneIndex: 0, id: 'zone-0' },
+      },
       services: [service],
     } as never)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
 
     await p.discoverDevices()
 
@@ -280,16 +329,23 @@ describe('actronAirNeoPlatform', () => {
     const service = {
       name: `${zone0.NV_Title} Fan`,
       testCharacteristic: () => true,
-      getCharacteristic: () => ({ get value() { return service.name } }),
+      getCharacteristic: () => ({
+        get value() { return service.name },
+      }),
       updateCharacteristic: (_id: unknown, value: string) => { service.name = value },
     }
     p.configureAccessory({
       UUID: 'uuid-zone-0',
       displayName: zone0.NV_Title,
-      context: { device: { kind: 'zone', zoneIndex: 0, id: 'zone-0' } },
+      context: {
+        device: { kind: 'zone', zoneIndex: 0, id: 'zone-0' },
+      },
       services: [service],
     } as never)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
 
     await p.discoverDevices()
 
@@ -442,7 +498,10 @@ describe('actronAirNeoPlatform', () => {
         UserAirconSettings: { ...restStatus.lastKnownState.UserAirconSettings, QuietModeEnabled: false },
       },
     }
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => noQuietStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => noQuietStatus,
+    } as never)
 
     await p.discoverDevices()
 
@@ -454,7 +513,10 @@ describe('actronAirNeoPlatform', () => {
   it('derives capabilities once after the first successful status fetch and logs the detected model', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
 
     await p.discoverDevices()
 
@@ -483,11 +545,19 @@ describe('actronAirNeoPlatform', () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(
       log,
-      { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt', refreshInterval: 1 } as never,
+      {
+        platform: 'ActronAirNeo',
+        name: 'x',
+        refreshToken: 'rt',
+        refreshInterval: 1,
+      } as never,
       api,
     )
     const getStatus = vi.fn(async () => restStatus)
-    p.injectForTest({ getSystems: async () => systems, getStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus,
+    } as never)
 
     await p.discoverDevices()
     getStatus.mockClear()
@@ -529,14 +599,20 @@ describe('actronAirNeoPlatform', () => {
   it('does not run an overlapping poll while one is still in flight', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
     await p.discoverDevices()
 
     let releaseStatus: (() => void) | undefined
     const slowGetStatus = vi.fn(() => new Promise((resolve) => {
       releaseStatus = () => resolve(restStatus)
     }))
-    p.injectForTest({ getSystems: async () => systems, getStatus: slowGetStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: slowGetStatus,
+    } as never)
 
     const first = p.poll()
     const second = p.poll() // must be a no-op skip, not a second overlapping request
@@ -550,7 +626,10 @@ describe('actronAirNeoPlatform', () => {
   it('clears cloudConnected when a poll fails, so the accessory comms guard means something', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
     await p.discoverDevices()
     expect(p.state.cloudConnected).toBe(true)
 
@@ -570,7 +649,13 @@ describe('actronAirNeoPlatform', () => {
 
     const zone0 = restStatus.lastKnownState.RemoteZoneInfo[0]
     const oldUuid = `uuid-zone-0-${zone0.NV_Title}`
-    const cached = { UUID: oldUuid, displayName: zone0.NV_Title, context: { device: { kind: 'zone', zoneIndex: 0, id: `zone-0-${zone0.NV_Title}` } } }
+    const cached = {
+      UUID: oldUuid,
+      displayName: zone0.NV_Title,
+      context: {
+        device: { kind: 'zone', zoneIndex: 0, id: `zone-0-${zone0.NV_Title}` },
+      },
+    }
     p.configureAccessory(cached as never)
 
     p.injectForTest({
@@ -604,10 +689,15 @@ describe('actronAirNeoPlatform', () => {
       lastKnownState: {
         ...restStatus.lastKnownState,
         RemoteZoneInfo: restStatus.lastKnownState.RemoteZoneInfo.map((z: { NV_Title?: string }, i: number) =>
-          i === 0 ? { ...z, NV_Title: 'Totally Renamed Zone' } : z),
+          i === 0
+            ? { ...z, NV_Title: 'Totally Renamed Zone' }
+            : z),
       },
     }
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => renamed } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => renamed,
+    } as never)
     await p.discoverDevices()
 
     const zone0AfterRename = p.accessories.find(a => (a.context.device as { kind?: string, zoneIndex?: number } | undefined)?.kind === 'zone' && (a.context.device as { zoneIndex?: number }).zoneIndex === 0)
@@ -651,13 +741,22 @@ describe('actronAirNeoPlatform', () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(
       log,
-      { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt', refreshInterval: 1 } as never,
+      {
+        platform: 'ActronAirNeo',
+        name: 'x',
+        refreshToken: 'rt',
+        refreshInterval: 1,
+      } as never,
       api,
     )
     const getSystems = vi.fn(async () => {
       throw new Error('cloud down')
     })
-    p.injectForTest({ getSystems, getStatus: async () => restStatus, getConnectionDetails: vi.fn() } as never)
+    p.injectForTest({
+      getSystems,
+      getStatus: async () => restStatus,
+      getConnectionDetails: vi.fn(),
+    } as never)
 
     await p.discoverDevices()
     expect(NeoMqtt).not.toHaveBeenCalled()
@@ -673,11 +772,20 @@ describe('actronAirNeoPlatform', () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(
       log,
-      { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt', refreshInterval: 1 } as never,
+      {
+        platform: 'ActronAirNeo',
+        name: 'x',
+        refreshToken: 'rt',
+        refreshInterval: 1,
+      } as never,
       api,
     )
     const getStatus = vi.fn(async () => restStatus)
-    p.injectForTest({ getSystems: async () => systems, getStatus, getConnectionDetails: vi.fn() } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus,
+      getConnectionDetails: vi.fn(),
+    } as never)
 
     await p.discoverDevices()
     const instance = vi.mocked(NeoMqtt).mock.results[0].value as { healthy: boolean, opts: { onHealthChange: (h: boolean) => void } }
@@ -700,11 +808,20 @@ describe('actronAirNeoPlatform', () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(
       log,
-      { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt', refreshInterval: 1 } as never,
+      {
+        platform: 'ActronAirNeo',
+        name: 'x',
+        refreshToken: 'rt',
+        refreshInterval: 1,
+      } as never,
       api,
     )
     const getStatus = vi.fn(async () => restStatus)
-    p.injectForTest({ getSystems: async () => systems, getStatus, getConnectionDetails: vi.fn() } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus,
+      getConnectionDetails: vi.fn(),
+    } as never)
 
     await p.discoverDevices()
     const instance = vi.mocked(NeoMqtt).mock.results[0].value as { healthy: boolean, opts: { onHealthChange: (h: boolean) => void } }
@@ -724,17 +841,30 @@ describe('actronAirNeoPlatform', () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(
       log,
-      { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt', refreshInterval: 1 } as never,
+      {
+        platform: 'ActronAirNeo',
+        name: 'x',
+        refreshToken: 'rt',
+        refreshInterval: 1,
+      } as never,
       api,
     )
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus, getConnectionDetails: vi.fn() } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+      getConnectionDetails: vi.fn(),
+    } as never)
     await p.discoverDevices()
 
     let releaseStatus: (() => void) | undefined
     const slowGetStatus = vi.fn(() => new Promise((resolve) => {
       releaseStatus = () => resolve(restStatus)
     }))
-    p.injectForTest({ getSystems: async () => systems, getStatus: slowGetStatus, getConnectionDetails: vi.fn() } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: slowGetStatus,
+      getConnectionDetails: vi.fn(),
+    } as never)
 
     await vi.advanceTimersByTimeAsync(1000) // fires the scheduled poll; it's now in flight, blocked on releaseStatus
     expect(slowGetStatus).toHaveBeenCalledTimes(1)
@@ -760,11 +890,17 @@ describe('actronAirNeoPlatform', () => {
       api,
     )
     const sendCommand = vi.fn(async () => ({ type: 'ack' }))
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus, sendCommand } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+      sendCommand,
+    } as never)
     await p.discoverDevices()
 
     // Zone 0 disabled elsewhere; only MQTT sees it (no poll runs in between).
-    const pushed = restStatus.lastKnownState.UserAirconSettings.EnabledZones.map((on: boolean, i: number) => i === 0 ? false : on)
+    const pushed = restStatus.lastKnownState.UserAirconSettings.EnabledZones.map((on: boolean, i: number) => i === 0
+      ? false
+      : on)
     p.state.applyDelta({ 'UserAirconSettings.EnabledZones': pushed })
 
     await p.commands.run(NeoCommand.ZONE_ENABLE, { zoneIndex: 1 })
@@ -773,14 +909,19 @@ describe('actronAirNeoPlatform', () => {
     expected[1] = true
     expect(sendCommand).toHaveBeenCalledWith(
       systems._embedded['ac-system'][0].serial,
-      { command: { 'UserAirconSettings.EnabledZones': expected, 'type': 'set-settings' } },
+      {
+        command: { 'UserAirconSettings.EnabledZones': expected, 'type': 'set-settings' },
+      },
     )
   })
 
   it('logs a revoked account link from the poll loop at error, not debug', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
     await p.discoverDevices()
 
     log.error.mockClear()
@@ -796,7 +937,10 @@ describe('actronAirNeoPlatform', () => {
   it('logs the revoked account link once, not once per poll', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
     await p.discoverDevices()
 
     log.error.mockClear()
@@ -846,7 +990,10 @@ describe('actronAirNeoPlatform', () => {
   it('warns once repeated polls keep failing, instead of staying silent at debug forever', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
     await p.discoverDevices()
 
     log.warn.mockClear()
@@ -870,7 +1017,11 @@ describe('actronAirNeoPlatform', () => {
       { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never,
       api,
     )
-    p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus, sendCommand: vi.fn() } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+      sendCommand: vi.fn(),
+    } as never)
     await p.discoverDevices()
 
     const pending = p.commands.run(NeoCommand.ON)
@@ -910,12 +1061,17 @@ describe('actronAirNeoPlatform', () => {
       const stale = { UUID: 'stale', displayName: 'Removed', context: {} } as never
       p.configureMatterAccessory(cached)
       p.configureMatterAccessory(stale)
-      const operation = stage === 'register' ? api.matter.registerPlatformAccessories : api.matter.updatePlatformAccessories
+      const operation = stage === 'register'
+        ? api.matter.registerPlatformAccessories
+        : api.matter.updatePlatformAccessories
       let release!: () => void
       operation.mockImplementationOnce(() => new Promise<void>((resolve) => {
         release = resolve
       }))
-      p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => restStatus,
+      } as never)
       const discovery = p.discoverDevices()
       await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce())
       const trackedBeforeShutdown = p.matterAccessories.size
@@ -933,10 +1089,17 @@ describe('actronAirNeoPlatform', () => {
       const api = makeApi({ matterEnabled: true })
       const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
       const stale = { UUID: 'stale', displayName: 'Old Zone' } as never
-      const binding = { uuid: 'stale', accessory: stale, update: vi.fn() }
+      const binding = {
+        uuid: 'stale',
+        accessory: stale,
+        update: vi.fn(),
+      }
       p.configureMatterAccessory(stale)
       p.matterBindings.set('stale', binding)
-      p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => restStatus,
+      } as never)
       api.matter.unregisterPlatformAccessories.mockRejectedValueOnce(new Error('offline'))
       await p.discoverDevices()
       expect(p.matterAccessories.get('stale')).toBe(stale)
@@ -950,7 +1113,10 @@ describe('actronAirNeoPlatform', () => {
     it('discards bindings for rejected new registrations', async () => {
       const api = makeApi({ matterEnabled: true })
       const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)
-      p.injectForTest({ getSystems: async () => systems, getStatus: async () => restStatus } as never)
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => restStatus,
+      } as never)
       api.matter.registerPlatformAccessories.mockRejectedValue(new Error('offline'))
       await p.discoverDevices()
       expect(p.matterAccessories.size).toBe(0)

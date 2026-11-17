@@ -63,9 +63,18 @@ const ServiceTokens = {
 
 function baseTree() {
   return {
-    UserAirconSettings: { isOn: true, Mode: 'COOL', FanMode: 'LOW', EnabledZones: [] },
+    UserAirconSettings: {
+      isOn: true,
+      Mode: 'COOL',
+      FanMode: 'LOW',
+      EnabledZones: [],
+    },
     MasterInfo: { LiveTemp_oC: 24, LiveHumidity_pc: 45, LiveOutdoorTemp_oC: 18 },
-    LiveAircon: { CompressorMode: 'COOL', AmRunningFan: true, OutdoorUnit: { AmbientSensErr: false } },
+    LiveAircon: {
+      CompressorMode: 'COOL',
+      AmRunningFan: true,
+      OutdoorUnit: { AmbientSensErr: false },
+    },
     RemoteZoneInfo: [],
   }
 }
@@ -89,13 +98,20 @@ function makeHarness(tree: ReturnType<typeof baseTree>) {
 
   const platform = {
     state,
-    log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
     Service: ServiceTokens,
     Characteristic,
     serial: 'ABC123',
-    api: { hap: { HapStatusError: class HapStatusError extends Error {
-      constructor(public hapStatus: HAPStatus) { super(`HAP ${hapStatus}`) }
-    } } },
+    api: {
+      hap: { HapStatusError: class HapStatusError extends Error {
+        constructor(public hapStatus: HAPStatus) { super(`HAP ${hapStatus}`) }
+      } },
+    },
   }
 
   const outdoor = new OutdoorTempAccessory(platform as never, accessory as never)
@@ -212,7 +228,14 @@ describe('outdoorTempAccessory', () => {
     const { state, sensor } = makeHarness(withoutUnit as never)
     sensor.updates.length = 0
 
-    state.replace({ ...baseTree(), LiveAircon: { CompressorMode: 'COOL', AmRunningFan: true, OutdoorUnit: { AmbientSensErr: true } } } as never)
+    state.replace({
+      ...baseTree(),
+      LiveAircon: {
+        CompressorMode: 'COOL',
+        AmRunningFan: true,
+        OutdoorUnit: { AmbientSensErr: true },
+      },
+    } as never)
 
     expect(sensor.updates.some(u => u.id === Characteristic.StatusFault && u.value === Characteristic.StatusFault.GENERAL_FAULT)).toBe(true)
   })

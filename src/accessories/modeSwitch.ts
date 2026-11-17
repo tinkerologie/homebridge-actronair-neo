@@ -81,9 +81,13 @@ export class ModeSwitchAccessory implements DisposableAccessory {
   getOn(): CharacteristicValue {
     if (this.mode === 'continuousFan') {
       const fanMode = this.platform.state.get<string>(READ_PATH.continuousFan)
-      return fanMode?.endsWith('+CONT') ? 1 : 0
+      return fanMode?.endsWith('+CONT')
+        ? 1
+        : 0
     }
-    return this.platform.state.get<boolean>(READ_PATH[this.mode]) ? 1 : 0
+    return this.platform.state.get<boolean>(READ_PATH[this.mode])
+      ? 1
+      : 0
   }
 
   async setOn(value: CharacteristicValue): Promise<void> {

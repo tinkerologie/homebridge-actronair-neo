@@ -4,13 +4,21 @@ import { NeoAuthRevokedError } from '../src/neo/auth.js'
 import { NeoApiError, NeoRest } from '../src/neo/rest.js'
 
 const restStatus = JSON.parse(readFileSync('test/fixtures/rest-status.json', 'utf8'))
-const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never
+const log = {
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+} as never
 
 function make(fetchImpl: typeof fetch, invalidate = vi.fn()) {
   return {
     rest: new NeoRest({
       baseUrl: 'https://nimbus.actronair.com.au',
-      auth: { getAccessToken: async () => 'tok', invalidate } as never,
+      auth: {
+        getAccessToken: async () => 'tok',
+        invalidate,
+      } as never,
       fetchImpl,
       log,
       retryDelayMs: 0,
@@ -42,7 +50,9 @@ describe('neoRest', () => {
 
   it('refreshes once on 401 then succeeds', async () => {
     let n = 0
-    const fetchImpl = vi.fn(async () => (++n === 1 ? status(401) : ok(restStatus))) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () => (++n === 1
+      ? status(401)
+      : ok(restStatus))) as unknown as typeof fetch
     const { rest, invalidate } = make(fetchImpl)
     await expect(rest.getStatus('neo000000')).resolves.toBeDefined()
     expect(invalidate).toHaveBeenCalledTimes(1)
@@ -104,7 +114,12 @@ describe('neoRest', () => {
 
   it('honours a numeric Retry-After on 429', async () => {
     let n = 0
-    const fetchImpl = vi.fn(async () => (++n === 1 ? new Response('{}', { status: 429, headers: { 'Retry-After': '5' } }) : ok(restStatus))) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () => (++n === 1
+      ? new Response('{}', {
+          status: 429,
+          headers: { 'Retry-After': '5' },
+        })
+      : ok(restStatus))) as unknown as typeof fetch
     const { rest } = make(fetchImpl)
     const setTimeoutSpy = spyOnInstantSetTimeout()
     await expect(rest.getStatus('neo000000')).resolves.toBeDefined()
@@ -116,7 +131,12 @@ describe('neoRest', () => {
   it('honours an HTTP-date Retry-After on 429', async () => {
     let n = 0
     const retryAt = new Date(Date.now() + 10_000).toUTCString()
-    const fetchImpl = vi.fn(async () => (++n === 1 ? new Response('{}', { status: 429, headers: { 'Retry-After': retryAt } }) : ok(restStatus))) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () => (++n === 1
+      ? new Response('{}', {
+          status: 429,
+          headers: { 'Retry-After': retryAt },
+        })
+      : ok(restStatus))) as unknown as typeof fetch
     const { rest } = make(fetchImpl)
     const setTimeoutSpy = spyOnInstantSetTimeout()
     await expect(rest.getStatus('neo000000')).resolves.toBeDefined()
@@ -129,7 +149,9 @@ describe('neoRest', () => {
 
   it('falls back to the default retry delay when Retry-After is absent', async () => {
     let n = 0
-    const fetchImpl = vi.fn(async () => (++n === 1 ? new Response('{}', { status: 429 }) : ok(restStatus))) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () => (++n === 1
+      ? new Response('{}', { status: 429 })
+      : ok(restStatus))) as unknown as typeof fetch
     const { rest } = make(fetchImpl)
     const setTimeoutSpy = spyOnInstantSetTimeout()
     await expect(rest.getStatus('neo000000')).resolves.toBeDefined()
@@ -139,7 +161,10 @@ describe('neoRest', () => {
   })
 
   it('caps an absurd Retry-After at 60s and bounds 429 retries', async () => {
-    const fetchImpl = vi.fn(async () => new Response('{}', { status: 429, headers: { 'Retry-After': '86400' } })) as unknown as typeof fetch
+    const fetchImpl = vi.fn(async () => new Response('{}', {
+      status: 429,
+      headers: { 'Retry-After': '86400' },
+    })) as unknown as typeof fetch
     const { rest } = make(fetchImpl)
     const setTimeoutSpy = spyOnInstantSetTimeout()
     await expect(rest.getStatus('neo000000')).rejects.toBeInstanceOf(NeoApiError)
@@ -169,7 +194,10 @@ describe('neoRest', () => {
     }) as unknown as typeof fetch
     const rest = new NeoRest({
       baseUrl: 'https://nimbus.actronair.com.au',
-      auth: { getAccessToken: async () => 'tok', invalidate: vi.fn() } as never,
+      auth: {
+        getAccessToken: async () => 'tok',
+        invalidate: vi.fn(),
+      } as never,
       fetchImpl,
       log,
       retryDelayMs: 0,

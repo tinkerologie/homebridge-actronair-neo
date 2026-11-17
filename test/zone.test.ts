@@ -26,7 +26,12 @@ const CharacteristicTypes = {
   Name: 'Name',
   On: 'On',
   Active: { ACTIVE: 1, INACTIVE: 0 },
-  CurrentHeaterCoolerState: { INACTIVE: 0, IDLE: 1, HEATING: 2, COOLING: 3 },
+  CurrentHeaterCoolerState: {
+    INACTIVE: 0,
+    IDLE: 1,
+    HEATING: 2,
+    COOLING: 3,
+  },
   TargetHeaterCoolerState: { AUTO: 0, HEAT: 1, COOL: 2 },
   CurrentTemperature: 'CurrentTemperature',
   HeatingThresholdTemperature: 'HeatingThresholdTemperature',
@@ -161,8 +166,15 @@ function makePlatform(opts: MakePlatformOpts = {}) {
   state.setCloudConnected(true)
   state.replace(tree as never)
 
-  const commands = { run: vi.fn().mockResolvedValue('SUCCESS') }
-  const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  const commands = {
+    run: vi.fn().mockResolvedValue('SUCCESS'),
+  }
+  const log = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }
 
   const platform = {
     Service: ServiceTypes,
@@ -175,7 +187,9 @@ function makePlatform(opts: MakePlatformOpts = {}) {
       zonesAsHeaterCoolers: false,
       ...opts,
     },
-    api: { hap: { HapStatusError: FakeHapStatusError } },
+    api: {
+      hap: { HapStatusError: FakeHapStatusError },
+    },
   } as never
 
   return { platform, state, commands, log }
@@ -382,7 +396,18 @@ describe('zoneAccessory', () => {
     void new ZoneAccessory(platform, accessory as never, 0)
     const onChar = accessory.getService(ServiceTypes.Switch)!.getCharacteristic(CharacteristicTypes.On)
 
-    state.applyDelta({ 'UserAirconSettings.EnabledZones': [false, false, false, false, true, false, false, false] })
+    state.applyDelta({
+      'UserAirconSettings.EnabledZones': [
+        false,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+        false,
+      ],
+    })
     expect(onChar.value).toBe(0)
   })
 
@@ -665,7 +690,9 @@ describe('zoneAccessory sensors (battery, temperature, humidity)', () => {
       limits: { VarianceAboveMasterCool: 2, VarianceBelowMasterCool: 2 },
     })
     commands.run.mockImplementation(async (command: string) =>
-      command === NeoCommand.COOL_SET_POINT ? 'API_ERROR' : 'SUCCESS')
+      command === NeoCommand.COOL_SET_POINT
+        ? 'API_ERROR'
+        : 'SUCCESS')
     const accessory = new FakeAccessory('Zone A')
     void new ZoneAccessory(platform, accessory as never, 0)
 

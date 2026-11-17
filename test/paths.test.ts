@@ -3,8 +3,14 @@ import { getPath, normalizeDeltaPath, setPath } from '../src/neo/paths.js'
 
 describe('path helpers', () => {
   const tree = () => ({
-    UserAirconSettings: { Mode: 'HEAT', EnabledZones: [true, false] },
-    RemoteZoneInfo: [{ LiveTemp_oC: 21 }, { LiveTemp_oC: 22 }],
+    UserAirconSettings: {
+      Mode: 'HEAT',
+      EnabledZones: [true, false],
+    },
+    RemoteZoneInfo: [
+      { LiveTemp_oC: 21 },
+      { LiveTemp_oC: 22 },
+    ],
   })
 
   it('reads a dotted path', () => {

@@ -15,7 +15,10 @@ function tree(overrides: { Enabled?: boolean, Duration?: number } = {}): StatusT
     ...baseTree,
     UserAirconSettings: {
       ...baseTree.UserAirconSettings,
-      AfterHours: { ...baseTree.UserAirconSettings.AfterHours, ...overrides },
+      AfterHours: {
+        ...baseTree.UserAirconSettings.AfterHours,
+        ...overrides,
+      },
     },
   }
 }
@@ -87,8 +90,15 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
   const state = new NeoState()
   state.replace(initialTree)
   state.setCloudConnected(cloudConnected)
-  const commands = { run: vi.fn(async () => 'SUCCESS') }
-  const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  const commands = {
+    run: vi.fn(async () => 'SUCCESS'),
+  }
+  const log = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }
   return {
     state,
     commands,
@@ -104,7 +114,9 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
       ValveType: 'ValveType',
       SetDuration: 'SetDuration',
     },
-    api: { hap: { HapStatusError: class HapStatusError extends Error {} } },
+    api: {
+      hap: { HapStatusError: class HapStatusError extends Error {} },
+    },
   } as never
 }
 

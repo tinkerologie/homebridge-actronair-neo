@@ -85,7 +85,12 @@ const Characteristic = {
   Name: 'Name',
   CurrentRelativeHumidity: 'CurrentRelativeHumidity',
   Active: { ACTIVE: 1, INACTIVE: 0 },
-  CurrentHeaterCoolerState: { INACTIVE: 0, IDLE: 1, HEATING: 2, COOLING: 3 },
+  CurrentHeaterCoolerState: {
+    INACTIVE: 0,
+    IDLE: 1,
+    HEATING: 2,
+    COOLING: 3,
+  },
   TargetHeaterCoolerState: { AUTO: 0, HEAT: 1, COOL: 2 },
   CurrentTemperature: 'CurrentTemperature',
   HeatingThresholdTemperature: 'HeatingThresholdTemperature',
@@ -126,8 +131,19 @@ function baseTree() {
 function fullCapabilities(): NeoCapabilities {
   return {
     model: 'Test Unit',
-    modes: { cool: true, heat: true, auto: true, fan: true, dry: false },
-    fanSpeeds: [FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH, FanMode.AUTO],
+    modes: {
+      cool: true,
+      heat: true,
+      auto: true,
+      fan: true,
+      dry: false,
+    },
+    fanSpeeds: [
+      FanMode.LOW,
+      FanMode.MEDIUM,
+      FanMode.HIGH,
+      FanMode.AUTO,
+    ],
     supportsAutoFan: true,
     supportsTurbo: false,
     supportsVft: false,
@@ -151,10 +167,20 @@ function makeHarness(
 ) {
   const state = new NeoState()
   state.setCloudConnected(true)
-  if (seed)
-    state.replace({ ...baseTree(), ...(limits ? { NV_Limits: { UserSetpoint_oC: limits } } : {}) } as never)
+  if (seed) {
+    state.replace({
+      ...baseTree(),
+      ...(limits
+        ? {
+            NV_Limits: { UserSetpoint_oC: limits },
+          }
+        : {}),
+    } as never)
+  }
 
-  const commands = { run: vi.fn().mockResolvedValue('SUCCESS') }
+  const commands = {
+    run: vi.fn().mockResolvedValue('SUCCESS'),
+  }
 
   const services = new Map<string, FakeService>()
   services.set(ServiceTokens.AccessoryInformation, new FakeService())
@@ -187,10 +213,17 @@ function makeHarness(
     commands,
     capabilities,
     cfg: { ...cfgOverrides },
-    log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    api: { hap: { HapStatusError: class HapStatusError extends Error {
-      constructor(public hapStatus: HAPStatus) { super(`HAP ${hapStatus}`) }
-    } } },
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
+    api: {
+      hap: { HapStatusError: class HapStatusError extends Error {
+        constructor(public hapStatus: HAPStatus) { super(`HAP ${hapStatus}`) }
+      } },
+    },
     Service: ServiceTokens,
     Characteristic,
     serial: 'ABC123',
@@ -201,7 +234,17 @@ function makeHarness(
   const humidity = services.get(ServiceTokens.HumiditySensor)!
   const filter = services.get(ServiceTokens.FilterMaintenance)!
 
-  return { state, commands, platform, master, hvac, humidity, filter, services, removed }
+  return {
+    state,
+    commands,
+    platform,
+    master,
+    hvac,
+    humidity,
+    filter,
+    services,
+    removed,
+  }
 }
 
 describe('masterAccessory', () => {
@@ -317,7 +360,14 @@ describe('masterAccessory', () => {
     // The owner's real hardware reports 16-30 for both modes, while the config defaults
     // offer cool 20-32 / heat 10-26: without this, 16-19°C cooling and 27-30°C heating are
     // unreachable and 31-32°C cooling is offered, sent, and silently clamped by the cloud.
-    const { hvac } = makeHarness({}, { limits: { setCool_Min: 16, setCool_Max: 30, setHeat_Min: 16, setHeat_Max: 30 } })
+    const { hvac } = makeHarness({}, {
+      limits: {
+        setCool_Min: 16,
+        setCool_Max: 30,
+        setHeat_Min: 16,
+        setHeat_Max: 30,
+      },
+    })
 
     expect(hvac.getCharacteristic(Characteristic.HeatingThresholdTemperature).props)
       .toMatchObject({ minValue: 16, maxValue: 30 })
@@ -326,7 +376,9 @@ describe('masterAccessory', () => {
   })
 
   it('clamps HeatingThresholdTemperature minValue to 10 even if the device reports lower', () => {
-    const { hvac } = makeHarness({}, { limits: { setHeat_Min: 5, setHeat_Max: 30 } })
+    const { hvac } = makeHarness({}, {
+      limits: { setHeat_Min: 5, setHeat_Max: 30 },
+    })
     const heat = hvac.getCharacteristic(Characteristic.HeatingThresholdTemperature)
     expect(heat.props.minValue).toBe(10)
   })
@@ -377,7 +429,16 @@ describe('masterAccessory', () => {
 
   describe('climate mode capability gating', () => {
     it('offers only the target states the unit reports supporting', () => {
-      const capabilities = { ...fullCapabilities(), modes: { cool: true, heat: false, auto: false, fan: true, dry: false } }
+      const capabilities = {
+        ...fullCapabilities(),
+        modes: {
+          cool: true,
+          heat: false,
+          auto: false,
+          fan: true,
+          dry: false,
+        },
+      }
       const { hvac } = makeHarness({}, { capabilities })
 
       const target = hvac.getCharacteristic(Characteristic.TargetHeaterCoolerState)
@@ -389,7 +450,16 @@ describe('masterAccessory', () => {
     it('still offers a usable thermostat, with a warning, when the unit reports no heat/cool/auto at all', () => {
       // HAP cannot accept an empty validValues list. capabilities reports the device honestly;
       // this is the one place that has to compromise, and it must say so.
-      const capabilities = { ...fullCapabilities(), modes: { cool: false, heat: false, auto: false, fan: true, dry: false } }
+      const capabilities = {
+        ...fullCapabilities(),
+        modes: {
+          cool: false,
+          heat: false,
+          auto: false,
+          fan: true,
+          dry: false,
+        },
+      }
       const { hvac, platform } = makeHarness({}, { capabilities })
 
       expect(hvac.getCharacteristic(Characteristic.TargetHeaterCoolerState).props.validValues).toHaveLength(3)
@@ -397,7 +467,16 @@ describe('masterAccessory', () => {
     })
 
     it('never reports a target state outside validValues, even if the device reports that mode', () => {
-      const capabilities = { ...fullCapabilities(), modes: { cool: true, heat: false, auto: true, fan: true, dry: false } }
+      const capabilities = {
+        ...fullCapabilities(),
+        modes: {
+          cool: true,
+          heat: false,
+          auto: true,
+          fan: true,
+          dry: false,
+        },
+      }
       const { state, master } = makeHarness({}, { capabilities })
 
       state.applyDelta({ 'UserAirconSettings.Mode': 'HEAT' })
@@ -529,15 +608,29 @@ describe('masterAccessory', () => {
     })
 
     it('seeds ConfiguredName on a fan service cached from before it was set, which would otherwise never get one', () => {
-      const { services } = makeHarness({}, { cachedServices: [ServiceTokens.Fanv2] })
+      const { services } = makeHarness({}, {
+        cachedServices: [ServiceTokens.Fanv2],
+      })
       const fan = services.get(ServiceTokens.Fanv2)!
 
       expect(fan.getCharacteristic(Characteristic.ConfiguredName).value).toBe('Master Fan')
     })
 
     it('adds no fan service for a unit that does not support fan-only, and drops a cached one', () => {
-      const capabilities = { ...fullCapabilities(), modes: { cool: true, heat: true, auto: true, fan: false, dry: false } }
-      const { services, removed } = makeHarness({}, { capabilities, cachedServices: [ServiceTokens.Fanv2] })
+      const capabilities = {
+        ...fullCapabilities(),
+        modes: {
+          cool: true,
+          heat: true,
+          auto: true,
+          fan: false,
+          dry: false,
+        },
+      }
+      const { services, removed } = makeHarness({}, {
+        capabilities,
+        cachedServices: [ServiceTokens.Fanv2],
+      })
 
       expect(removed).toEqual([ServiceTokens.Fanv2])
       expect(services.has(ServiceTokens.Fanv2)).toBe(false)
@@ -560,7 +653,10 @@ describe('masterAccessory', () => {
 
     it('reads OK when the unit reports no filter alert at all, rather than nagging about an unknown filter', () => {
       const { state, master } = makeHarness()
-      state.replace({ ...baseTree(), Alerts: {} } as never)
+      state.replace({
+        ...baseTree(),
+        Alerts: {},
+      } as never)
 
       expect(master.getFilterChangeIndication()).toBe(Characteristic.FilterChangeIndication.FILTER_OK)
     })
@@ -585,13 +681,18 @@ describe('masterAccessory', () => {
     it('pushes the indication when the whole Alerts subtree appears, not just when the flag flips', () => {
       // A subtree appearing reports the parent path; NeoState now also reports the leaves, and
       // this is the accessory-level half of that contract.
-      const withoutAlerts = { ...baseTree() } as Record<string, unknown>
+      const withoutAlerts = {
+        ...baseTree(),
+      } as Record<string, unknown>
       delete withoutAlerts.Alerts
       const { state, filter } = makeHarness({}, { seed: false })
       state.replace(withoutAlerts as never)
       filter.updates.length = 0
 
-      state.replace({ ...baseTree(), Alerts: { CleanFilter: true } } as never)
+      state.replace({
+        ...baseTree(),
+        Alerts: { CleanFilter: true },
+      } as never)
 
       expect(filter.updates.some(
         u => u.id === Characteristic.FilterChangeIndication && u.value === Characteristic.FilterChangeIndication.CHANGE_FILTER,
@@ -641,7 +742,11 @@ describe('masterAccessory', () => {
 
   describe('fan speed capability gating (spec: task-20)', () => {
     it('maps the RotationSpeed slider across halves for a 2-speed unit (LOW/MED, no AUTO), and round-trips', async () => {
-      const capabilities: NeoCapabilities = { ...fullCapabilities(), fanSpeeds: [FanMode.LOW, FanMode.MEDIUM], supportsAutoFan: false }
+      const capabilities: NeoCapabilities = {
+        ...fullCapabilities(),
+        fanSpeeds: [FanMode.LOW, FanMode.MEDIUM],
+        supportsAutoFan: false,
+      }
       const { state, commands, master } = makeHarness({}, { capabilities })
 
       await master.setFanMode(40)
@@ -658,7 +763,11 @@ describe('masterAccessory', () => {
     })
 
     it('maps the RotationSpeed slider across thirds for a 3-speed unit (LOW/MED/HIGH, no AUTO), and round-trips', () => {
-      const capabilities: NeoCapabilities = { ...fullCapabilities(), fanSpeeds: [FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH], supportsAutoFan: false }
+      const capabilities: NeoCapabilities = {
+        ...fullCapabilities(),
+        fanSpeeds: [FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH],
+        supportsAutoFan: false,
+      }
       const { state, master } = makeHarness({}, { capabilities })
       state.applyDelta({ 'UserAirconSettings.FanMode': 'LOW' })
       expect(master.getFanMode()).toBe(33)
@@ -686,7 +795,11 @@ describe('masterAccessory', () => {
     })
 
     it('regression: setFanMode does not throw when capabilities are degraded to an empty fanSpeeds list', async () => {
-      const capabilities: NeoCapabilities = { ...fullCapabilities(), fanSpeeds: [], supportsAutoFan: false }
+      const capabilities: NeoCapabilities = {
+        ...fullCapabilities(),
+        fanSpeeds: [],
+        supportsAutoFan: false,
+      }
       const { commands, master } = makeHarness({}, { capabilities })
 
       await expect(master.setFanMode(100)).resolves.toBeUndefined()
@@ -701,7 +814,12 @@ describe('setpoint characteristics stay inside the range HAP was told about', ()
   // Tightening minValue to the device's own floor (16 on the owner's NTW-1000) without
   // seeding a value made HAP reject the stored one — "supplied illegal value: number 0
   // exceeded minimum of 16" on every startup.
-  const deviceLimits = { setCool_Min: 16, setCool_Max: 30, setHeat_Min: 16, setHeat_Max: 30 }
+  const deviceLimits = {
+    setCool_Min: 16,
+    setCool_Max: 30,
+    setHeat_Min: 16,
+    setHeat_Max: 30,
+  }
 
   it('seeds a legal value at construction rather than leaving the HAP default in place', () => {
     const { hvac } = makeHarness({}, { limits: deviceLimits })
@@ -716,7 +834,11 @@ describe('setpoint characteristics stay inside the range HAP was told about', ()
 
   it('clamps into range when the device reports no setpoint at all', () => {
     const { state, master } = makeHarness({}, { limits: deviceLimits })
-    state.replace({ ...baseTree(), NV_Limits: { UserSetpoint_oC: deviceLimits }, UserAirconSettings: {} } as never)
+    state.replace({
+      ...baseTree(),
+      NV_Limits: { UserSetpoint_oC: deviceLimits },
+      UserAirconSettings: {},
+    } as never)
 
     // Without clamping these fall back to 0 and 10 — both below the device's 16 floor.
     expect(master.getHeatingThresholdTemperature()).toBe(16)

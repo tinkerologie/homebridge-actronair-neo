@@ -26,7 +26,9 @@ async function resolveZoneSetpoint(
 ): Promise<number> {
   const target = Math.min(Math.max(value, bounds.min), bounds.max)
   const limits = getUserSetpointLimits(platform.state)
-  const [below = 0, above = 0] = limits ? variance(limits) : []
+  const [below = 0, above = 0] = limits
+    ? variance(limits)
+    : []
   if (below <= 0 && above <= 0)
     return target
 
@@ -39,8 +41,12 @@ async function resolveZoneSetpoint(
   if (target >= min && target <= max)
     return target
 
-  const field = masterCommand === NeoCommand.HEAT_SET_POINT ? 'heatTemp' : 'coolTemp'
-  const nudgedMaster = target < min ? target + below : target - above
+  const field = masterCommand === NeoCommand.HEAT_SET_POINT
+    ? 'heatTemp'
+    : 'coolTemp'
+  const nudgedMaster = target < min
+    ? target + below
+    : target - above
   assertMatterCommandSuccess(platform, await platform.commands.run(masterCommand, { [field]: nudgedMaster }))
   return target
 }
@@ -70,7 +76,9 @@ export function buildZoneMatterAccessory(
     if (enabledZones && enabledZones[zi] !== undefined)
       return enabledZones[zi]
     const pos = platform.state.get<number>(paths.zonePosition)
-    return pos !== undefined ? pos > 0 : false
+    return pos !== undefined
+      ? pos > 0
+      : false
   }
 
   function getZoneSystemMode(): MatterSystemMode {
@@ -95,14 +103,20 @@ export function buildZoneMatterAccessory(
       const pct = Math.min(100, Math.max(0, sensorInfo.batteryPct))
       return {
         batPercentRemaining: Math.round(pct * 2), // 0-200 in Matter
-        batChargeLevel: pct < 15 ? 2 : pct < 30 ? 1 : 0, // 0=Ok, 1=Warning, 2=Critical
+        batChargeLevel: pct < 15
+          ? 2
+          : pct < 30
+            ? 1
+            : 0, // 0=Ok, 1=Warning, 2=Critical
       }
     }
     return undefined
   }
 
   const liveTemp = getUsableZoneTemp(platform.state, zi)
-  const initialTemp = liveTemp !== undefined ? Math.round(liveTemp * 100) : 2100
+  const initialTemp = liveTemp !== undefined
+    ? Math.round(liveTemp * 100)
+    : 2100
   const initialHeat = Math.round((platform.state.get<number>(paths.heatSetpoint) ?? 20) * 100)
   const initialCool = Math.round((platform.state.get<number>(paths.coolSetpoint) ?? 24) * 100)
   const batteryState = getBatteryState()
@@ -154,7 +168,9 @@ export function buildZoneMatterAccessory(
               await platform.commands.run(enable ? NeoCommand.ZONE_ENABLE : NeoCommand.ZONE_DISABLE, { zoneIndex: zi }),
             )
             platform.log.debug(`Matter set Zone ${zi} (${device.displayName}) mode -> ${systemMode} (enable: ${enable})`)
-            platform.api.matter?.updateAccessoryState(uuid, 'thermostat', { systemMode: getZoneSystemMode() }).catch((err) => {
+            platform.api.matter?.updateAccessoryState(uuid, 'thermostat', {
+              systemMode: getZoneSystemMode(),
+            }).catch((err) => {
               platform.log.debug(`Failed to reconcile Matter zone ${zi} systemMode: ${(err as Error).message}`)
             })
           },
@@ -309,7 +325,9 @@ export function buildZoneMatterAccessory(
         }
         if (all || sensorChanged || zoneChanged) {
           const currentTemp = getUsableZoneTemp(platform.state, zi)
-          update.localTemperature = currentTemp !== undefined ? Math.round(currentTemp * 100) : null
+          update.localTemperature = currentTemp !== undefined
+            ? Math.round(currentTemp * 100)
+            : null
         }
 
         if (Object.keys(update).length > 0) {
@@ -321,7 +339,9 @@ export function buildZoneMatterAccessory(
       else {
         // Switch mode
         if (all || enabledChanged || masterChanged || zoneChanged) {
-          platform.api.matter?.updateAccessoryState(uuid, 'onOff', { onOff: getZoneEnabled() }).catch((err) => {
+          platform.api.matter?.updateAccessoryState(uuid, 'onOff', {
+            onOff: getZoneEnabled(),
+          }).catch((err) => {
             platform.log.debug(`Failed to update Matter zone ${zi} switch state: ${(err as Error).message}`)
           })
         }
@@ -330,7 +350,11 @@ export function buildZoneMatterAccessory(
           platform.api.matter?.updateAccessoryState(
             uuid,
             'temperatureMeasurement',
-            { measuredValue: currentTemp !== undefined ? Math.round(currentTemp * 100) : null },
+            {
+              measuredValue: currentTemp !== undefined
+                ? Math.round(currentTemp * 100)
+                : null,
+            },
             'temperature',
           ).catch((err) => {
             platform.log.debug(`Failed to update Matter zone ${zi} temperature: ${(err as Error).message}`)
@@ -339,7 +363,11 @@ export function buildZoneMatterAccessory(
           platform.api.matter?.updateAccessoryState(
             uuid,
             'relativeHumidityMeasurement',
-            { measuredValue: currentHum !== undefined ? Math.round(currentHum * 100) : null },
+            {
+              measuredValue: currentHum !== undefined
+                ? Math.round(currentHum * 100)
+                : null,
+            },
             'humidity',
           ).catch((err) => {
             platform.log.debug(`Failed to update Matter zone ${zi} humidity: ${(err as Error).message}`)

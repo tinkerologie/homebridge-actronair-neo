@@ -45,7 +45,10 @@ describe('neoState', () => {
     it('reports them on the way out too, so a watcher is told the value is gone', () => {
       const s = new NeoState()
       const withUnit = tree() as Record<string, unknown>
-      withUnit.LiveAircon = { ...(withUnit.LiveAircon as object), OutdoorUnit: { AmbientSensErr: true } }
+      withUnit.LiveAircon = {
+        ...(withUnit.LiveAircon as object),
+        OutdoorUnit: { AmbientSensErr: true },
+      }
       s.replace(withUnit as never)
       let seen = new Set<string>()
       s.onChange((paths) => {
@@ -220,7 +223,9 @@ describe('neoState', () => {
     const listener = vi.fn()
     s.onChange(listener)
 
-    const applied = s.applyDelta({ 'UserAirconSettings.EnabledZones': [...current!] })
+    const applied = s.applyDelta({
+      'UserAirconSettings.EnabledZones': [...current!],
+    })
     expect(applied.ok).toBe(true)
     expect(listener).not.toHaveBeenCalled()
   })

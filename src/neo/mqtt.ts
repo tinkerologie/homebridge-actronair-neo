@@ -179,7 +179,12 @@ export class NeoMqtt {
 
   private wire(client: MqttClient, userId: string): void {
     const base = `actron-cloud/${userId}/neo/${this.opts.serial.toLowerCase()}/mwc`
-    const topics = [`${base}/full-status`, `${base}/status-change`, `${base}/heart-beat`, `${base}/cmd-response/+/+`]
+    const topics = [
+      `${base}/full-status`,
+      `${base}/status-change`,
+      `${base}/heart-beat`,
+      `${base}/cmd-response/+/+`,
+    ]
 
     // A connect-time CONNACK rejection (bad/expired token, banned client, etc) and a
     // post-connect socket drop both need the same cleanup + reconnect. mqtt.js only emits

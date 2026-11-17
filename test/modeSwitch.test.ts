@@ -14,7 +14,10 @@ const baseTree = StatusResponseSchema.parse(
 function tree(overrides: Partial<StatusTree['UserAirconSettings']> = {}): StatusTree {
   return {
     ...baseTree,
-    UserAirconSettings: { ...baseTree.UserAirconSettings, ...overrides },
+    UserAirconSettings: {
+      ...baseTree.UserAirconSettings,
+      ...overrides,
+    },
   }
 }
 
@@ -78,16 +81,30 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
   const state = new NeoState()
   state.replace(initialTree)
   state.setCloudConnected(cloudConnected)
-  const commands = { run: vi.fn(async () => 'SUCCESS') }
-  const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  const commands = {
+    run: vi.fn(async () => 'SUCCESS'),
+  }
+  const log = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }
   return {
     state,
     commands,
     log,
     cfg: {},
     Service: { AccessoryInformation: 'AccessoryInformation', Switch: 'Switch' },
-    Characteristic: { Manufacturer: 'Manufacturer', Model: 'Model', Name: 'Name', On: 'On' },
-    api: { hap: { HapStatusError: class HapStatusError extends Error {} } },
+    Characteristic: {
+      Manufacturer: 'Manufacturer',
+      Model: 'Model',
+      Name: 'Name',
+      On: 'On',
+    },
+    api: {
+      hap: { HapStatusError: class HapStatusError extends Error {} },
+    },
   } as never
 }
 
@@ -97,7 +114,13 @@ function build(mode: 'away' | 'quiet' | 'continuousFan' | 'turbo', initialTree: 
   const modeSwitch = new ModeSwitchAccessory(platform, accessory, mode)
   const service = (accessory as unknown as FakeAccessory).getService('Switch')!
   const onCharacteristic = service.getCharacteristic('On')
-  return { platform: platform as unknown as { state: NeoState, commands: { run: ReturnType<typeof vi.fn> } }, accessory, modeSwitch, service, onCharacteristic }
+  return {
+    platform: platform as unknown as { state: NeoState, commands: { run: ReturnType<typeof vi.fn> } },
+    accessory,
+    modeSwitch,
+    service,
+    onCharacteristic,
+  }
 }
 
 describe('isTurboModeSupported', () => {
@@ -109,7 +132,9 @@ describe('isTurboModeSupported', () => {
 
   it('is true when the unit reports support', () => {
     const state = new NeoState()
-    state.replace(tree({ TurboMode: { Supported: true, Enabled: false } } as never))
+    state.replace(tree({
+      TurboMode: { Supported: true, Enabled: false },
+    } as never))
     expect(isTurboModeSupported(state)).toBe(true)
   })
 })
@@ -186,12 +211,16 @@ describe('modeSwitchAccessory', () => {
 
   describe('turbo', () => {
     it('reads TurboMode.Enabled', () => {
-      const { modeSwitch } = build('turbo', tree({ TurboMode: { Supported: true, Enabled: true } } as never))
+      const { modeSwitch } = build('turbo', tree({
+        TurboMode: { Supported: true, Enabled: true },
+      } as never))
       expect(modeSwitch.getOn()).toBe(1)
     })
 
     it('sends TURBO_MODE_ON / TURBO_MODE_OFF', async () => {
-      const { modeSwitch, platform } = build('turbo', tree({ TurboMode: { Supported: true, Enabled: false } } as never))
+      const { modeSwitch, platform } = build('turbo', tree({
+        TurboMode: { Supported: true, Enabled: false },
+      } as never))
       await modeSwitch.setOn(true)
       expect(platform.commands.run).toHaveBeenCalledWith(NeoCommand.TURBO_MODE_ON)
       await modeSwitch.setOn(false)
@@ -199,7 +228,9 @@ describe('modeSwitchAccessory', () => {
     })
 
     it('throws instead of writing when the cloud is disconnected', async () => {
-      const { modeSwitch, platform } = build('turbo', tree({ TurboMode: { Supported: true, Enabled: false } } as never), false)
+      const { modeSwitch, platform } = build('turbo', tree({
+        TurboMode: { Supported: true, Enabled: false },
+      } as never), false)
       await expect(modeSwitch.setOn(true)).rejects.toThrow()
       expect(platform.commands.run).not.toHaveBeenCalled()
     })
@@ -245,7 +276,9 @@ describe('modeSwitchAccessory', () => {
     })
 
     it('throws instead of resolving normally when the command queue reports API_ERROR', async () => {
-      const { modeSwitch, platform } = build('turbo', tree({ TurboMode: { Supported: true, Enabled: false } } as never))
+      const { modeSwitch, platform } = build('turbo', tree({
+        TurboMode: { Supported: true, Enabled: false },
+      } as never))
       platform.commands.run.mockResolvedValue('API_ERROR')
       await expect(modeSwitch.setOn(true)).rejects.toThrow()
     })

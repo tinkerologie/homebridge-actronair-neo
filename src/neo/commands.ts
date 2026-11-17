@@ -5,7 +5,11 @@ import { CommandResult, NeoCommand } from './types.js'
 
 type Builder = (coolTemp: number, heatTemp: number, zoneIndex: number, zones: boolean[], duration: number) => { command: object }
 
-const set = (fields: Record<string, unknown>) => ({ command: { ...fields, type: 'set-settings' } })
+function set(fields: Record<string, unknown>) {
+  return {
+    command: { ...fields, type: 'set-settings' },
+  }
+}
 
 export const commandBuilders: Record<string, Builder> = {
   [NeoCommand.ON]: () => set({ 'UserAirconSettings.isOn': true }),
@@ -54,7 +58,9 @@ export const commandBuilders: Record<string, Builder> = {
 
 /** Zone toggles always send the complete desired array, built at flush time. */
 export function buildEnabledZones(zones: boolean[]) {
-  return set({ 'UserAirconSettings.EnabledZones': [...zones] })
+  return set({
+    'UserAirconSettings.EnabledZones': [...zones],
+  })
 }
 
 /**

@@ -4,7 +4,10 @@ import { NeoAuth, NeoAuthRevokedError } from '../src/neo/auth.js'
 const BASE = 'https://nimbus.actronair.com.au'
 
 function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 beforeEach(() => {
@@ -21,7 +24,12 @@ function makeAuth(fetchImpl: typeof fetch) {
     clientId: 'home_assistant',
     refreshToken: 'refresh-1',
     fetchImpl,
-    log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
+    log: {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    } as never,
   })
 }
 

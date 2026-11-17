@@ -44,7 +44,13 @@ export class Debouncer {
       reject = rej
     })
     const timer = setTimeout(() => this.flush(key), delayMs)
-    this.entries.set(key, { promise, resolve, reject, action: action as () => Promise<unknown>, timer })
+    this.entries.set(key, {
+      promise,
+      resolve,
+      reject,
+      action: action as () => Promise<unknown>,
+      timer,
+    })
     return promise as Promise<T>
   }
 

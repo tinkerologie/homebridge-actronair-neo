@@ -297,7 +297,9 @@ export class ZoneAccessory implements DisposableAccessory {
   }
 
   getEnableState(): CharacteristicValue {
-    return this.getEnabled() ? 1 : 0
+    return this.getEnabled()
+      ? 1
+      : 0
   }
 
   /**
@@ -448,7 +450,9 @@ export class ZoneAccessory implements DisposableAccessory {
     const target = Math.min(Math.max(value, bounds.min), bounds.max)
 
     const limits = this.limits()
-    const [below = 0, above = 0] = limits ? variance(limits) : []
+    const [below = 0, above = 0] = limits
+      ? variance(limits)
+      : []
     if (below <= 0 && above <= 0)
       return target
 
@@ -461,11 +465,15 @@ export class ZoneAccessory implements DisposableAccessory {
     if (target >= min && target <= max)
       return target
 
-    const field = masterCommand === NeoCommand.HEAT_SET_POINT ? 'heatTemp' : 'coolTemp'
+    const field = masterCommand === NeoCommand.HEAT_SET_POINT
+      ? 'heatTemp'
+      : 'coolTemp'
     // Nudge the master just far enough that its variance band re-includes the requested zone
     // value — not to the zone value itself, which would only coincidentally satisfy the band
     // (or, if the band is offset, still leave the zone value outside it).
-    const nudgedMaster = target < min ? target + below : target - above
+    const nudgedMaster = target < min
+      ? target + below
+      : target - above
     // A failed nudge means the zone value can't legally apply — surface it like every other
     // command site rather than returning the value as if it had been adopted.
     assertCommandSuccess(this.platform, await this.platform.commands.run(masterCommand, { [field]: nudgedMaster }))

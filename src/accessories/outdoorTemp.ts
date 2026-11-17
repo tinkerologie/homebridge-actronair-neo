@@ -72,7 +72,9 @@ export class OutdoorTempAccessory implements DisposableAccessory {
 
   getStatusFault(): CharacteristicValue {
     const { NO_FAULT, GENERAL_FAULT } = this.platform.Characteristic.StatusFault
-    return this.platform.state.get<boolean>(WATCHED.sensErr) === true ? GENERAL_FAULT : NO_FAULT
+    return this.platform.state.get<boolean>(WATCHED.sensErr) === true
+      ? GENERAL_FAULT
+      : NO_FAULT
   }
 
   getCurrentTemperature(): CharacteristicValue {
