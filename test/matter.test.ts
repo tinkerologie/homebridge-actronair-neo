@@ -299,6 +299,22 @@ describe('matter layer', () => {
       expect(binding.uuid).toBe(accessory.UUID)
     })
 
+    it('a zone setpoint honours the Neo symmetric variance, like the HAP zone (master nudged)', async () => {
+      // The fixture reports every NV_Limits variance as 0 and ZoneTemperatureSetpointVariance_oC
+      // as 2: with the master cooling at 22, a zone at 28 is outside [20, 24].
+      const { platform, commands } = makePlatform({ zonesAsHeaterCoolers: true })
+      platform.state.setCloudConnected(true)
+      const { accessory } = buildZoneMatterAccessory(platform, {
+        id: 'zone-0',
+        displayName: 'Living Room',
+        kind: 'zone',
+        zoneIndex: 0,
+      })
+      await accessory.handlers!.thermostat!.occupiedCoolingSetpointChange!({ occupiedCoolingSetpoint: 2800 })
+      expect(commands.run).toHaveBeenCalledWith(NeoCommand.COOL_SET_POINT, { coolTemp: 26 })
+      expect(commands.run).toHaveBeenCalledWith(NeoCommand.ZONE_COOL_SET_POINT, { coolTemp: 28, zoneIndex: 0 })
+    })
+
     it('handles zone systemModeChange as zone enable/disable and reconciles systemMode', async () => {
       const { platform, commands, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
       const { accessory } = buildZoneMatterAccessory(platform, {

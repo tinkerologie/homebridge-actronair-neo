@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An account that still has a replaced or retired controller linked (one the cloud reports with no state) no longer fails discovery forever. Without a configured System Serial, the first system that actually reports state is used.
 - A new accessory that fails to initialise is no longer registered as an empty tile in HomeKit; it is retried on the next discovery.
 - The plugin no longer imports a runtime value from the `homebridge` package; HAP status codes come from `api.hap`, as Homebridge recommends.
+- Zone setpoints now respect how far the Neo app lets a zone differ from the main setpoint (`ZoneTemperatureSetpointVariance_oC`, typically 2°C). Neo units report the other variance fields as 0, so zones were previously unconstrained in HomeKit and Matter. When a zone is set outside that band, the main setpoint is moved just enough, as before.
+- Matter accessories restored after a restart now show the system's current state immediately, rather than what they showed before the restart.
+- Matter: turning a zone on or off no longer briefly snaps it back to its previous state.
+- Matter: thermostat limits and setpoints stay within the range the device reports. This stops repeated "Failed to update Matter accessory state" errors in the log, and a unit without an auto fan no longer fails to register its Matter thermostat. A Matter thermostat with no temperature reading shows none instead of 21°C, and updates are no longer sent to humidity, temperature or battery parts a zone doesn't have.
+- HomeKit zone tiles no longer offer a heat/cool/auto picker that did nothing: a zone follows the main unit's mode, so the mode is now shown read-only and limited to the modes the unit supports. Zone temperature thresholds never report an out-of-range value.
+- Mode switches report on/off as true/false, and the mode switches and After Hours valve have their own serial numbers.
+- On shutdown, a pending cloud request or rate-limit wait (up to 60 seconds) is cancelled instead of delaying Homebridge's exit.
+- If the ActronAir cloud ever issues a new account token, the plugin uses it straight away and the settings page saves it.
 - Account linking in the settings page no longer trusts the ActronAir cloud's device-code response unchecked. The verification link must be `https`. A missing or too-small polling interval falls back to the RFC 8628 default of 5 seconds instead of polling the cloud in a tight loop. A response missing its code or expiry is reported as an error instead of silently "timing out".
 
 ### Security
@@ -27,11 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The settings-page server rejects malformed requests from the browser (non-string, empty, or containing control characters) before anything is sent to the ActronAir cloud.
 - The account-linking link is only shown when it points at the ActronAir domain over https, and opens with `noreferrer`. Linking reports a failure instead of "Account linked" if the cloud returns no refresh token.
 - The settings page can no longer run two account-linking loops at once (for example after Cancel then Link), and no longer leaks its countdown timer.
+- The settings page no longer receives the ActronAir access token at all; the account lookup happens server-side. Saving from the settings page applies just that change to the current configuration, so edits made in the options form below are no longer overwritten.
 
 ### Changed
 
 - `refreshInterval` now has a 10-second minimum, because the ActronAir cloud rate-limits faster polling. A lower value in an existing config is raised to 10 seconds with a startup warning, so the plugin still starts.
 - TypeScript now compiles to ES2024; every supported Node version (22, 24, 26) runs it natively.
+- On connecting to push updates, the plugin asks the unit for its full state, as the ActronAir app does. That saves a cloud request on every reconnect; a cloud refresh still runs if no answer arrives within 15 seconds.
 
 ## [1.3.2] - 2026-10-28
 

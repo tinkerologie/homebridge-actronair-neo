@@ -2,7 +2,7 @@ import type { MatterAccessory } from 'homebridge'
 import type { UserSetpointLimits } from '../neo/capabilities.js'
 import type { ActronAirNeoPlatform, Discovered } from '../platform.js'
 import type { MatterBinding } from './types.js'
-import { getUsableZoneHumidity, getUsableZoneTemp, getUserSetpointLimits, resolveSetpointBounds } from '../neo/capabilities.js'
+import { getUsableZoneHumidity, getUsableZoneTemp, resolveSetpointBounds, resolveZoneVariance } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, NeoCommand } from '../neo/types.js'
 import { clampSetpoint, thermostatLimits, toCelsius } from './thermostat.js'
@@ -26,10 +26,8 @@ async function resolveZoneSetpoint(
   variance: (limits: UserSetpointLimits) => [below: number | undefined, above: number | undefined],
 ): Promise<number> {
   const target = Math.min(Math.max(value, bounds.min), bounds.max)
-  const limits = getUserSetpointLimits(platform.state)
-  const [below = 0, above = 0] = limits
-    ? variance(limits)
-    : []
+  // Same resolution as the HAP zone: NV_Limits when non-zero, else Neo's symmetric variance.
+  const [below, above] = resolveZoneVariance(platform.state, variance)
   if (below <= 0 && above <= 0)
     return target
 
