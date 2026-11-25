@@ -63,6 +63,12 @@ export const UserAirconSettingsSchema = z.looseObject({
   EnabledZones: z.array(z.boolean()).default([]),
   TemperatureSetpoint_Cool_oC: numeric,
   TemperatureSetpoint_Heat_oC: numeric,
+  /**
+   * How far (either way) a zone setpoint may sit from the master's on Neo. The Neo app
+   * constrains zones with this, not with NV_Limits' VarianceAbove/BelowMaster* keys, which Neo
+   * reports as 0 (they are meaningful on Que). See resolveZoneVariance() in zone.ts.
+   */
+  ZoneTemperatureSetpointVariance_oC: numeric,
   AfterHours: z.looseObject({
     Enabled: z.boolean().optional(),
     // Coerced consistent with NV_Limits: this feeds a write path (the duration
@@ -270,6 +276,7 @@ const ALLOWED_DELTA_PATHS: Record<string, z.ZodType> = {
   'UserAirconSettings.EnabledZones': z.array(z.boolean()),
   'UserAirconSettings.TemperatureSetpoint_Cool_oC': numeric,
   'UserAirconSettings.TemperatureSetpoint_Heat_oC': numeric,
+  'UserAirconSettings.ZoneTemperatureSetpointVariance_oC': numeric,
   'UserAirconSettings.AfterHours.Enabled': z.boolean(),
   'UserAirconSettings.AfterHours.Duration': numeric,
   'UserAirconSettings.TurboMode.Supported': z.boolean(),

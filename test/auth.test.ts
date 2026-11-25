@@ -34,6 +34,23 @@ function makeAuth(fetchImpl: typeof fetch) {
 }
 
 describe('neoAuth', () => {
+  it('adopts a rotated refresh token for the next renewal, and says how to persist it', async () => {
+    const bodies: string[] = []
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(String(init.body))
+      return jsonResponse({ access_token: `at-${bodies.length}`, refresh_token: 'refresh-2', expires_in: 1 })
+    })
+    const auth = makeAuth(fetchImpl as never)
+    await auth.getAccessToken()
+    auth.invalidate()
+    await auth.getAccessToken()
+    expect(new URLSearchParams(bodies[0]).get('refresh_token')).toBe('refresh-1')
+    expect(new URLSearchParams(bodies[1]).get('refresh_token')).toBe('refresh-2')
+    const log = (auth as unknown as { opts: { log: { warn: ReturnType<typeof vi.fn> } } }).opts.log
+    expect(log.warn).toHaveBeenCalledTimes(1)
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/plugin settings/i))
+  })
+
   it('requests a device code', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({
       device_code: 'dc',

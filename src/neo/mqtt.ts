@@ -19,6 +19,11 @@ const MAX_BACKOFF_MS = 60_000
 
 /** No heart-beat message for this long means the push connection is not trustworthy, even if the socket looks open. */
 const HEARTBEAT_STALE_MS = 180_000
+/**
+ * How long a fresh connection waits for the unit's answer to `getAll` (a full-status push)
+ * before falling back to a REST resync. The answer normally lands within a second or two.
+ */
+const GET_ALL_FALLBACK_MS = 15_000
 
 export interface NeoMqttOptions {
   rest: NeoRest
@@ -57,6 +62,8 @@ export class NeoMqtt {
   private backoffMs = MIN_BACKOFF_MS
   private reconnectTimer?: NodeJS.Timeout
   private staleTimer?: NodeJS.Timeout
+  /** Pending REST fallback for the current connection's getAll request. */
+  private getAllFallbackTimer?: NodeJS.Timeout
   private stopped = true
   private connected = false
   private isHealthy = false
@@ -83,6 +90,7 @@ export class NeoMqtt {
     this.backoffMs = MIN_BACKOFF_MS
     clearTimeout(this.reconnectTimer)
     clearTimeout(this.staleTimer)
+    clearTimeout(this.getAllFallbackTimer)
     this.setHealthy(false)
     this.endClient()
   }
@@ -91,6 +99,7 @@ export class NeoMqtt {
     const client = this.client
     this.client = undefined
     this.connected = false
+    clearTimeout(this.getAllFallbackTimer)
     if (!client)
       return
     discardClient(client)
@@ -146,12 +155,13 @@ export class NeoMqtt {
     if (this.stopped)
       return
 
+    const clientId = `homebridge-actronair-neo-${randomUUID()}`
     let client: MqttClient
     try {
       client = this.connectImpl(`mqtts://${endpoint.Endpoint}:${endpoint.Port}`, {
         username: email ?? '',
         password: token,
-        clientId: `homebridge-actronair-neo-${randomUUID()}`,
+        clientId,
         clean: true,
         keepalive: 60,
         reconnectPeriod: 0, // we own reconnect/backoff below
@@ -175,11 +185,12 @@ export class NeoMqtt {
     }
 
     this.client = client
-    this.wire(client, endpoint.UserId)
+    this.wire(client, endpoint.UserId, clientId)
   }
 
-  private wire(client: MqttClient, userId: string): void {
+  private wire(client: MqttClient, userId: string, clientId: string): void {
     const base = `actron-cloud/${userId}/neo/${this.opts.serial.toLowerCase()}/mwc`
+    const commandTopic = `actron-cloud/${userId}/neo/${this.opts.serial.toLowerCase()}/app/cmd`
     const topics = [
       `${base}/full-status`,
       `${base}/status-change`,
@@ -227,9 +238,29 @@ export class NeoMqtt {
         if (err)
           this.opts.log.debug(`MQTT subscribe failed: ${err.message}`)
       })
-      // Always resync on (re)connect: any state change missed while disconnected must not
-      // silently persist.
-      void this.resyncFromRest()
+      // Always refresh on (re)connect: any state change missed while disconnected must not
+      // silently persist. Ask the unit to push its full state (`getAll`, as the Neo app does on
+      // every connect; upstream ActronAirAPI 22f0238), which saves a REST call per reconnect
+      // against the ~20/min rate limit. REST stays the guarantee: if the publish fails, or no
+      // full status arrives in time, resync from REST as before.
+      clearTimeout(this.getAllFallbackTimer)
+      this.getAllFallbackTimer = setTimeout(() => {
+        this.opts.log.debug('No full status after getAll, resyncing via REST')
+        void this.resyncFromRest()
+      }, GET_ALL_FALLBACK_MS)
+      const request = JSON.stringify({
+        command: { type: 'getAll' },
+        // The answer is routed back on a cmd-response topic scoped to this prefix.
+        correlationId: `${clientId}/${randomUUID()}`,
+        OptOutOfLogging: false,
+      })
+      client.publish(commandTopic, request, { qos: 0 }, (err) => {
+        if (!err)
+          return
+        this.opts.log.debug(`MQTT getAll publish failed, resyncing via REST: ${err.message}`)
+        clearTimeout(this.getAllFallbackTimer)
+        void this.resyncFromRest()
+      })
     }
 
     const onMessage = (topic: string, payload: Buffer): void => {
@@ -298,6 +329,8 @@ export class NeoMqtt {
         void this.resyncFromRest()
         return
       }
+      // A full status is the answer the getAll fallback waits for (or makes it moot anyway).
+      clearTimeout(this.getAllFallbackTimer)
       this.applyReplace(parsed.data.event, 'full-status push')
       return
     }

@@ -104,6 +104,7 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
     state,
     commands,
     log,
+    serial: 'NEO000000',
     cfg: {},
     Service: { AccessoryInformation: 'AccessoryInformation', Valve: 'Valve' },
     Characteristic: {
@@ -114,6 +115,7 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
       InUse: 'InUse',
       ValveType: 'ValveType',
       SetDuration: 'SetDuration',
+      SerialNumber: 'SerialNumber',
     },
     api: {
       hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {} },
@@ -137,6 +139,12 @@ function build(initialTree: StatusTree, cloudConnected = true) {
 }
 
 describe('afterHoursAccessory', () => {
+  it('has a unique serial number matching its Matter counterpart', () => {
+    const { accessory } = build(tree({} as never))
+    const info = (accessory as unknown as FakeAccessory).getService('AccessoryInformation')!
+    expect(info.getCharacteristic('SerialNumber').value).toBe('NEO000000-after-hours')
+  })
+
   it('reads AfterHours.Enabled', () => {
     const { afterHours } = build(tree({ Enabled: true }))
     expect(afterHours.getActive()).toBe(1)

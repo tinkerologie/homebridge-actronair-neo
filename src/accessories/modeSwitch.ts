@@ -61,6 +61,8 @@ export class ModeSwitchAccessory implements DisposableAccessory {
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Actron')
       .setCharacteristic(this.platform.Characteristic.Model, `${this.platform.capabilities?.model ?? 'ActronAir Neo'} ${mode} Switch`)
+      // Unique per accessory, matching the Matter switch's, instead of HAP's "Default-SerialNumber".
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, `${this.platform.serial}-${mode}`)
 
     const service = this.accessory.getService(this.platform.Service.Switch)
       ?? this.accessory.addService(this.platform.Service.Switch)
@@ -77,16 +79,11 @@ export class ModeSwitchAccessory implements DisposableAccessory {
     })
   }
 
+  /** Boolean, matching Switch.On's HAP format. */
   getOn(): CharacteristicValue {
-    if (this.mode === 'continuousFan') {
-      const fanMode = this.platform.state.get<string>(READ_PATH.continuousFan)
-      return fanMode?.endsWith('+CONT')
-        ? 1
-        : 0
-    }
-    return this.platform.state.get<boolean>(READ_PATH[this.mode])
-      ? 1
-      : 0
+    if (this.mode === 'continuousFan')
+      return this.platform.state.get<string>(READ_PATH.continuousFan)?.endsWith('+CONT') ?? false
+    return Boolean(this.platform.state.get<boolean>(READ_PATH[this.mode]))
   }
 
   async setOn(value: CharacteristicValue): Promise<void> {

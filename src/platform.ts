@@ -171,6 +171,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.shuttingDown = true
       clearTimeout(this.pollTimer)
       this.mqtt?.stop()
+      // Aborts in-flight requests and retry waits (a 429 may ask for up to 60s).
+      this.rest?.close?.()
       this.commands?.cancelPending()
       this.unsubscribeState()
       for (const binding of this.hapBindings.values())

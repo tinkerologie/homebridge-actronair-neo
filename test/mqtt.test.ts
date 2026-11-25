@@ -47,6 +47,13 @@ class FakeClient extends EventEmitter {
   end(): void {
     this.ended = true
   }
+
+  published: Array<{ topic: string, payload: string }> = []
+  publishError: Error | undefined
+  publish(topic: string, payload: string, _opts: unknown, cb?: (err?: Error) => void): void {
+    this.published.push({ topic, payload })
+    cb?.(this.publishError)
+  }
 }
 
 function makeConnectImpl(clients: FakeClient[] = []) {
@@ -192,25 +199,82 @@ describe('neoMqtt', () => {
     expect(rest.getStatus).toHaveBeenCalledTimes(1)
   })
 
-  it('resyncs via REST on every (re)connect', async () => {
-    const state = new NeoState()
-    const rest = buildRest()
-    const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({
-      rest: rest as never,
-      auth: buildAuth() as never,
-      state,
-      serial: SERIAL,
-      log,
-      connectImpl: impl as never,
+  describe('state refresh on (re)connect', () => {
+    function setup() {
+      const state = new NeoState()
+      const rest = buildRest()
+      const { impl, clients } = makeConnectImpl()
+      const mqtt = new NeoMqtt({
+        rest: rest as never,
+        auth: buildAuth() as never,
+        state,
+        serial: SERIAL,
+        log,
+        connectImpl: impl as never,
+      })
+      const base = `actron-cloud/${CONNECTION_DETAILS.UserId}/neo/${SERIAL.toLowerCase()}`
+      return { state, rest, clients, mqtt, base }
+    }
+
+    it('asks the unit for a full status with getAll, as the Neo app does (upstream ActronAirAPI 22f0238)', async () => {
+      const { rest, clients, mqtt, base } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(clients[0].published).toHaveLength(1)
+      const { topic, payload } = clients[0].published[0]
+      expect(topic).toBe(`${base}/app/cmd`)
+      const body = JSON.parse(payload)
+      expect(body.command).toEqual({ type: 'getAll' })
+      expect(body.correlationId).toMatch(/^homebridge-actronair-neo-[\w-]+\/[\w-]+$/)
+      // No REST call up front: the push answer makes it redundant.
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      mqtt.stop()
     })
 
-    await mqtt.start()
-    clients[0].emit('connect')
-    await vi.advanceTimersByTimeAsync(0)
+    it('falls back to a REST resync when no full status arrives in time, so a missed change never persists', async () => {
+      const { state, rest, clients, mqtt } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(14_999)
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      expect(state.ready).toBe(true)
+      mqtt.stop()
+    })
 
-    expect(rest.getStatus).toHaveBeenCalledTimes(1)
-    expect(state.ready).toBe(true)
+    it('skips the REST fallback once the getAll answer (a full status) has arrived', async () => {
+      const { rest, clients, mqtt, base } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      clients[0].emit('message', `${base}/mwc/full-status`, Buffer.from(JSON.stringify(fullStatusPush)))
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      mqtt.stop()
+    })
+
+    it('resyncs via REST at once when the getAll publish fails', async () => {
+      const { rest, clients, mqtt } = setup()
+      await mqtt.start()
+      clients[0].publishError = new Error('not authorized to publish')
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      mqtt.stop()
+    })
+
+    it('a dropped connection cancels the pending fallback', async () => {
+      const { rest, clients, mqtt } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      clients[0].emit('close')
+      await vi.advanceTimersByTimeAsync(15_000)
+      // Only the reconnected client's own fallback may fire later, never the dead one's.
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      mqtt.stop()
+    })
   })
 
   it('reconnects with exponential backoff (0.5s, 1s, 2s, ...) that actually caps at 60s, resetting after a success', async () => {

@@ -2,10 +2,17 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { UserSetpointLimits } from '../neo/capabilities.js'
 import type { ActronAirNeoPlatform } from '../platform.js'
 import type { DisposableAccessory } from './disposable.js'
-import { getUsableZoneHumidity, getUsableZoneTemp, getUserSetpointLimits, resolveSetpointBounds } from '../neo/capabilities.js'
+import { getUsableZoneHumidity, getUsableZoneTemp, resolveSetpointBounds, resolveZoneVariance } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, CompressorMode, NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
+
+/** A setpoint as HAP may serve it: inside the declared range, the minimum when unknown. */
+function clampToRange(value: number | undefined, range: { min: number, max: number }): number {
+  if (value === undefined || !Number.isFinite(value))
+    return range.min
+  return Math.min(range.max, Math.max(range.min, value))
+}
 
 export class ZoneAccessory implements DisposableAccessory {
   private readonly unsubscribeState: () => void
@@ -28,6 +35,11 @@ export class ZoneAccessory implements DisposableAccessory {
   private lastGoodHumidity: number | undefined
   /** Last heat/cool/auto the master reported — see getTargetHeaterCoolerState(). */
   private lastTargetState: number | undefined
+  /** TargetHeaterCoolerState values the unit supports; the getter never serves anything else. */
+  private targetStates: number[] = []
+  /** Threshold ranges as declared to HAP; the getters clamp into these. */
+  private heatRange = { min: 10, max: 30 }
+  private coolRange = { min: 20, max: 32 }
 
   private readonly paths: {
     name: string
@@ -134,7 +146,31 @@ export class ZoneAccessory implements DisposableAccessory {
       this.zoneService.getCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState)
         .onGet(this.getCurrentHeaterCoolerState.bind(this))
 
+      // A read-only mirror: zones follow the master's mode and cannot set it. Left writable, the
+      // Home app would offer a mode picker whose choice silently did nothing and then reverted.
+      // validValues follow the unit's reported modes, as MasterAccessory's do.
+      const { AUTO, HEAT, COOL } = this.platform.Characteristic.TargetHeaterCoolerState
+      const modes = this.platform.capabilities?.modes
+      const reported = [
+        ...(modes?.auto
+          ? [AUTO]
+          : []),
+        ...(modes?.heat
+          ? [HEAT]
+          : []),
+        ...(modes?.cool
+          ? [COOL]
+          : []),
+      ]
+      this.targetStates = reported.length
+        ? reported
+        : [AUTO, HEAT, COOL]
+      const { Perms } = this.platform.api.hap
       this.zoneService.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
+        .setProps({
+          validValues: this.targetStates,
+          perms: [Perms.PAIRED_READ, Perms.NOTIFY],
+        })
         .onGet(this.getTargetHeaterCoolerState.bind(this))
       // Called once here for its side effect: it records the mode the system is in now, so a
       // later switch into FAN has something real to hold instead of falling back to AUTO.
@@ -144,22 +180,30 @@ export class ZoneAccessory implements DisposableAccessory {
         .onGet(this.getCurrentTemperature.bind(this))
 
       const heatBounds = this.heatBounds()
+      this.heatRange = {
+        min: Math.max(10, heatBounds.min),
+        max: heatBounds.max,
+      }
       this.zoneService.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
         .setProps({
-          minValue: Math.max(10, heatBounds.min),
-          maxValue: heatBounds.max,
+          minValue: this.heatRange.min,
+          maxValue: this.heatRange.max,
           minStep: 0.5,
         })
+        // Seed a legal value: HAP's stored default may sit outside the new range.
+        .updateValue(this.getHeatingThresholdTemperature())
         .onGet(this.getHeatingThresholdTemperature.bind(this))
         .onSet(this.setHeatingThresholdTemperature.bind(this))
 
       const coolBounds = this.coolBounds()
+      this.coolRange = { min: coolBounds.min, max: coolBounds.max }
       this.zoneService.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
         .setProps({
-          minValue: coolBounds.min,
-          maxValue: coolBounds.max,
+          minValue: this.coolRange.min,
+          maxValue: this.coolRange.max,
           minStep: 0.5,
         })
+        .updateValue(this.getCoolingThresholdTemperature())
         .onGet(this.getCoolingThresholdTemperature.bind(this))
         .onSet(this.setCoolingThresholdTemperature.bind(this))
     }
@@ -211,10 +255,17 @@ export class ZoneAccessory implements DisposableAccessory {
       || changed.has('LiveAircon.AmRunningFan')
     // AirconSystem.Peripherals/.Sensors carry battery/RSSI/connection for every zone's
     // sensor, keyed by serial/designator rather than zone index — not caught by the `prefix`
-    // check above, so it needs its own watch.
-    const sensorChanged = [...changed].some(p => p.startsWith('AirconSystem.Peripherals') || p.startsWith('AirconSystem.Sensors'))
-    const mine = all || enabledChanged || masterChanged || sensorChanged
-      || [...changed].some(p => p.startsWith(prefix))
+    // check above, so it needs its own watch. One pass over the set, stopping at the first hit:
+    // this runs for every zone on every update, including each temperature tick.
+    let mine = all || enabledChanged || masterChanged
+    if (!mine) {
+      for (const p of changed) {
+        if (p.startsWith(prefix) || p.startsWith('AirconSystem.Peripherals') || p.startsWith('AirconSystem.Sensors')) {
+          mine = true
+          break
+        }
+      }
+    }
     if (!mine)
       return
 
@@ -297,8 +348,6 @@ export class ZoneAccessory implements DisposableAccessory {
 
   getEnableState(): CharacteristicValue {
     return this.getEnabled()
-      ? 1
-      : 0
   }
 
   /**
@@ -371,22 +420,19 @@ export class ZoneAccessory implements DisposableAccessory {
    */
   getTargetHeaterCoolerState(): CharacteristicValue {
     const { AUTO, HEAT, COOL } = this.platform.Characteristic.TargetHeaterCoolerState
-    switch (this.platform.state.get<string>('UserAirconSettings.Mode')) {
-      case ClimateMode.HEAT:
-        this.lastTargetState = HEAT
-        break
-      case ClimateMode.COOL:
-        this.lastTargetState = COOL
-        break
-      case ClimateMode.AUTO:
-        this.lastTargetState = AUTO
-        break
-    }
-    return this.lastTargetState ?? AUTO
+    const mapped = ({
+      [ClimateMode.HEAT]: HEAT,
+      [ClimateMode.COOL]: COOL,
+      [ClimateMode.AUTO]: AUTO,
+    } as Record<string, number>)[this.platform.state.get<string>('UserAirconSettings.Mode') ?? '']
+    // Never serve a value outside validValues: HAP rejects it outright.
+    if (mapped !== undefined && this.targetStates.includes(mapped))
+      this.lastTargetState = mapped
+    return this.lastTargetState ?? this.targetStates[0] ?? AUTO
   }
 
   getHeatingThresholdTemperature(): CharacteristicValue {
-    return this.platform.state.get<number>(this.paths.heatSetpoint) ?? 0
+    return clampToRange(this.platform.state.get<number>(this.paths.heatSetpoint), this.heatRange)
   }
 
   async setHeatingThresholdTemperature(value: CharacteristicValue): Promise<void> {
@@ -403,7 +449,7 @@ export class ZoneAccessory implements DisposableAccessory {
   }
 
   getCoolingThresholdTemperature(): CharacteristicValue {
-    return this.platform.state.get<number>(this.paths.coolSetpoint) ?? 0
+    return clampToRange(this.platform.state.get<number>(this.paths.coolSetpoint), this.coolRange)
   }
 
   async setCoolingThresholdTemperature(value: CharacteristicValue): Promise<void> {
@@ -419,10 +465,6 @@ export class ZoneAccessory implements DisposableAccessory {
     this.platform.log.debug(`Set Zone ${this.zoneName()} Cooling Temperature -> `, target)
   }
 
-  private limits(): UserSetpointLimits | undefined {
-    return getUserSetpointLimits(this.platform.state)
-  }
-
   /** Never trust the per-zone Min/MaxSetpoint fields to be present — most firmwares omit them. */
   private heatBounds(): { min: number, max: number } {
     return resolveSetpointBounds(this.platform.state, 'heat', this.zoneIndex)
@@ -433,11 +475,10 @@ export class ZoneAccessory implements DisposableAccessory {
   }
 
   /**
-   * Absolute clamp to the device's reported bounds always applies. On top of that, the Neo
-   * system may report a variance band around the master's setpoint for the same mode — but
-   * only a *non-zero* variance is a real constraint; 0 (or the field being absent) means the
-   * device does not restrict zones relative to the master at all. A violated non-zero variance
-   * nudges the master so the requested zone value can apply.
+   * Absolute clamp to the device's reported bounds always applies. On top of that, zones may be
+   * held within a variance band around the master's setpoint for the same mode (see
+   * resolveZoneVariance()). A violated variance nudges the master so the requested zone value
+   * can apply.
    */
   private async resolveZoneSetpoint(
     value: number,
@@ -448,10 +489,7 @@ export class ZoneAccessory implements DisposableAccessory {
   ): Promise<number> {
     const target = Math.min(Math.max(value, bounds.min), bounds.max)
 
-    const limits = this.limits()
-    const [below = 0, above = 0] = limits
-      ? variance(limits)
-      : []
+    const [below, above] = resolveZoneVariance(this.platform.state, variance)
     if (below <= 0 && above <= 0)
       return target
 

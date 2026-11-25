@@ -228,10 +228,65 @@ describe('homebridge-ui server', () => {
       await expect(server.pollToken({ deviceCode: 'dc' })).resolves.toMatchObject({ state: 'failed' })
     })
 
-    it('reports authorised with the refresh token on success', async () => {
+    it('reports authorised with the refresh token on success, and never hands the access token to the browser', async () => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), { status: 200 })))
       const { default: server } = await import('../homebridge-ui/server.js')
-      await expect(server.pollToken({ deviceCode: 'dc' })).resolves.toMatchObject({ state: 'authorised', refreshToken: 'r' })
+      const result = await server.pollToken({ deviceCode: 'dc' })
+      expect(result).toEqual({ state: 'authorised', refreshToken: 'r' })
+    })
+  })
+
+  describe('linked account (server-side token exchange)', () => {
+    function stubCloud(token: Record<string, unknown>, tokenStatus = 200) {
+      const fetchImpl = vi.fn(async (url: string) => {
+        if (url.endsWith('/oauth/token'))
+          return new Response(JSON.stringify(token), { status: tokenStatus })
+        if (url.includes('/client/account'))
+          return new Response(JSON.stringify({ email: 'x@example.com' }), { status: 200 })
+        return new Response(JSON.stringify({
+          _embedded: {
+            'ac-system': [
+              { serial: 's1', description: 'Home' },
+            ],
+          },
+        }), { status: 200 })
+      })
+      vi.stubGlobal('fetch', fetchImpl)
+      return fetchImpl
+    }
+
+    it('returns the account and systems without exposing the access token', async () => {
+      stubCloud({ access_token: 'secret-access' })
+      const { default: server } = await import('../homebridge-ui/server.js')
+      const result = await server.linkedAccount({ refreshToken: 'rt' })
+      expect(result).toEqual({
+        state: 'ok',
+        email: 'x@example.com',
+        systems: [
+          { serial: 's1', name: 'Home' },
+        ],
+      })
+      expect(JSON.stringify(result)).not.toContain('secret-access')
+    })
+
+    it('passes a rotated refresh token back so the settings page can save it', async () => {
+      stubCloud({ access_token: 'a', refresh_token: 'rt-new' })
+      const { default: server } = await import('../homebridge-ui/server.js')
+      await expect(server.linkedAccount({ refreshToken: 'rt' })).resolves.toMatchObject({ state: 'ok', refreshToken: 'rt-new' })
+    })
+
+    it('does not report an unchanged refresh token as rotated', async () => {
+      stubCloud({ access_token: 'a', refresh_token: 'rt' })
+      const { default: server } = await import('../homebridge-ui/server.js')
+      const result = await server.linkedAccount({ refreshToken: 'rt' })
+      expect(result).not.toHaveProperty('refreshToken')
+    })
+
+    it('reports an invalid link without calling the account endpoints', async () => {
+      const fetchImpl = stubCloud({}, 401)
+      const { default: server } = await import('../homebridge-ui/server.js')
+      await expect(server.linkedAccount({ refreshToken: 'rt' })).resolves.toEqual({ state: 'invalid' })
+      expect(fetchImpl).toHaveBeenCalledTimes(1)
     })
   })
 })

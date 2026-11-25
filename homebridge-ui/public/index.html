@@ -363,9 +363,9 @@
       }
       select.value = cfg.deviceSerial ?? info.systems[0]?.serial ?? ''
       select.onchange = async () => {
-        cfg.deviceSerial = select.value
-        await homebridge.updatePluginConfig(cfgArray)
-        await homebridge.savePluginConfig()
+        await saveConfig((c) => {
+          c.deviceSerial = select.value
+        })
       }
 
       // One system is the overwhelmingly common case: name it, don't ask about it. The
@@ -379,8 +379,19 @@
       showView('linked')
     }
 
-    async function saveConfig() {
-      await homebridge.updatePluginConfig(cfgArray)
+    /**
+     * Apply one change to the plugin's *current* config and save it. The page-load snapshot is
+     * not written back: the schema form below edits the same config, and saving the stale copy
+     * would silently discard whatever the user changed there since the page opened.
+     */
+    async function saveConfig(mutate) {
+      const latest = await homebridge.getPluginConfig()
+      const target = latest[0] ?? { platform: 'ActronAirNeo', name: 'ActronAir Neo' }
+      if (!latest.length)
+        latest.push(target)
+      mutate(target)
+      mutate(cfg) // keep this page's view in step
+      await homebridge.updatePluginConfig(latest)
       await homebridge.savePluginConfig()
     }
 
@@ -393,18 +404,23 @@
       if (!cfg.refreshToken)
         return showUnlinked()
       try {
-        const session = await homebridge.request('/session', {
+        // Token exchange and account lookup happen server-side; no access token comes back here.
+        const info = await homebridge.request('/linked-account', {
           clientId: cfg.clientId,
           refreshToken: cfg.refreshToken,
         })
-        if (session.state !== 'ok')
+        if (info.state !== 'ok')
           return showExpired()
-        const info = await homebridge.request('/account', { accessToken: session.accessToken })
+        if (info.refreshToken && info.refreshToken !== cfg.refreshToken) {
+          await saveConfig((c) => {
+            c.refreshToken = info.refreshToken
+          })
+        }
         showLinked(info)
       }
       catch (err) {
         // Only a cloud/network failure lands here; a genuinely invalid grant comes back as
-        // session.state !== 'ok' above and shows the re-link view instead.
+        // info.state !== 'ok' above and shows the re-link view instead.
         showCloudError(err)
       }
     }
@@ -455,8 +471,9 @@
           return
 
         if (result.state === 'authorised') {
-          cfg.refreshToken = result.refreshToken
-          await saveConfig()
+          await saveConfig((c) => {
+            c.refreshToken = result.refreshToken
+          })
           homebridge.toast.success('Account linked', 'ActronAir Neo')
           await refreshLinkedView()
           return
@@ -475,9 +492,10 @@
     }
 
     async function unlink() {
-      delete cfg.refreshToken
-      delete cfg.deviceSerial
-      await saveConfig()
+      await saveConfig((c) => {
+        delete c.refreshToken
+        delete c.deviceSerial
+      })
       showUnlinked()
     }
 

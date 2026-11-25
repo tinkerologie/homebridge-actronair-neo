@@ -90,8 +90,8 @@ class UiServer extends HomebridgePluginUiServer {
     super()
     this.onRequest('/device-code', ({ clientId } = {}) => this.requestDeviceCode(clientId))
     this.onRequest('/poll-token', p => this.pollToken(p))
-    this.onRequest('/account', p => this.account(p))
-    this.onRequest('/session', p => this.session(p))
+    // One round trip that keeps the access token on this side: the browser never needs it.
+    this.onRequest('/linked-account', p => this.linkedAccount(p))
     this.ready()
   }
 
@@ -127,7 +127,7 @@ class UiServer extends HomebridgePluginUiServer {
       // reported as "Account linked" with nothing written to the config.
       if (typeof json.refresh_token !== 'string' || !json.refresh_token)
         return { state: 'failed', error: 'The ActronAir cloud did not return a refresh token' }
-      return { state: 'authorised', refreshToken: json.refresh_token, accessToken: json.access_token }
+      return { state: 'authorised', refreshToken: json.refresh_token }
     }
     if (json.error === 'authorization_pending' || json.error === 'slow_down')
       return { state: 'pending', slowDown: json.error === 'slow_down' }
@@ -149,7 +149,36 @@ class UiServer extends HomebridgePluginUiServer {
       return { state: 'invalid' }
     if (status !== 200)
       throw new Error(`Could not reach the ActronAir cloud (HTTP ${status}). Please try again.`)
-    return { state: 'ok', accessToken: json.access_token }
+    // The cloud has not been seen to rotate refresh tokens, but if it ever returns a new one the
+    // old one may stop working: hand it back so the settings page can save it.
+    const rotated = typeof json.refresh_token === 'string' && json.refresh_token && json.refresh_token !== refreshToken
+      ? json.refresh_token
+      : undefined
+    return {
+      state: 'ok',
+      accessToken: json.access_token,
+      ...(rotated
+        ? { refreshToken: rotated }
+        : {}),
+    }
+  }
+
+  /**
+   * Who is linked, and which systems: the token exchange and the account lookup in one call, so
+   * the access token stays server-side. Carries a rotated refresh token back if there is one.
+   */
+  async linkedAccount({ clientId, refreshToken } = {}) {
+    const session = await this.session({ clientId, refreshToken })
+    if (session.state !== 'ok')
+      return { state: 'invalid' }
+    const info = await this.account({ accessToken: session.accessToken })
+    return {
+      state: 'ok',
+      ...info,
+      ...(session.refreshToken
+        ? { refreshToken: session.refreshToken }
+        : {}),
+    }
   }
 
   /**

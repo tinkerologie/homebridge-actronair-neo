@@ -55,6 +55,8 @@ export class AfterHoursAccessory implements DisposableAccessory {
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Actron')
       .setCharacteristic(this.platform.Characteristic.Model, `${this.platform.capabilities?.model ?? 'ActronAir Neo'} After Hours`)
+      // Unique per accessory, matching the Matter valve's, instead of HAP's "Default-SerialNumber".
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, `${this.platform.serial}-after-hours`)
 
     const service = this.accessory.getService(this.platform.Service.Valve)
       ?? this.accessory.addService(this.platform.Service.Valve)
