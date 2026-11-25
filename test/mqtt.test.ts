@@ -30,6 +30,15 @@ const log = logMocks as never
 class FakeClient extends EventEmitter {
   subscribed: string[] = []
   ended = false
+  /** Mirrors mqtt.js: its own constructor-registered 'close' listener clears connackTimer. */
+  internalCloseRuns = 0
+  constructor() {
+    super()
+    this.on('close', () => {
+      this.internalCloseRuns++
+    })
+  }
+
   subscribe(topics: string[], _opts: unknown, cb?: (err?: Error) => void): void {
     this.subscribed.push(...topics)
     cb?.()
@@ -37,6 +46,13 @@ class FakeClient extends EventEmitter {
 
   end(): void {
     this.ended = true
+  }
+
+  published: Array<{ topic: string, payload: string }> = []
+  publishError: Error | undefined
+  publish(topic: string, payload: string, _opts: unknown, cb?: (err?: Error) => void): void {
+    this.published.push({ topic, payload })
+    cb?.(this.publishError)
   }
 }
 
@@ -183,25 +199,97 @@ describe('neoMqtt', () => {
     expect(rest.getStatus).toHaveBeenCalledTimes(1)
   })
 
-  it('resyncs via REST on every (re)connect', async () => {
-    const state = new NeoState()
-    const rest = buildRest()
-    const { impl, clients } = makeConnectImpl()
-    const mqtt = new NeoMqtt({
-      rest: rest as never,
-      auth: buildAuth() as never,
-      state,
-      serial: SERIAL,
-      log,
-      connectImpl: impl as never,
+  describe('state refresh on (re)connect', () => {
+    function setup() {
+      const state = new NeoState()
+      state.setCloudConnected(true) // as discovery leaves it before push starts
+      const rest = buildRest()
+      const { impl, clients } = makeConnectImpl()
+      const mqtt = new NeoMqtt({
+        rest: rest as never,
+        auth: buildAuth() as never,
+        state,
+        serial: SERIAL,
+        log,
+        connectImpl: impl as never,
+      })
+      const base = `actron-cloud/${CONNECTION_DETAILS.UserId}/neo/${SERIAL.toLowerCase()}`
+      return { state, rest, clients, mqtt, base }
+    }
+
+    it('asks the unit for a full status with getAll, as the Neo app does (upstream ActronAirAPI 22f0238)', async () => {
+      const { rest, clients, mqtt, base } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(clients[0].published).toHaveLength(1)
+      const { topic, payload } = clients[0].published[0]
+      expect(topic).toBe(`${base}/app/cmd`)
+      const body = JSON.parse(payload)
+      expect(body.command).toEqual({ type: 'getAll' })
+      expect(body.correlationId).toMatch(/^homebridge-actronair-neo-[\w-]+\/[\w-]+$/)
+      // No REST call up front: the push answer makes it redundant.
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      mqtt.stop()
     })
 
-    await mqtt.start()
-    clients[0].emit('connect')
-    await vi.advanceTimersByTimeAsync(0)
+    it('falls back to a REST resync when no full status arrives in time, so a missed change never persists', async () => {
+      const { state, rest, clients, mqtt } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(14_999)
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      expect(state.ready).toBe(true)
+      mqtt.stop()
+    })
 
-    expect(rest.getStatus).toHaveBeenCalledTimes(1)
-    expect(state.ready).toBe(true)
+    it('skips the REST fallback once the getAll answer (a full status) has arrived', async () => {
+      const { rest, clients, mqtt, base } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      clients[0].emit('message', `${base}/mwc/full-status`, Buffer.from(JSON.stringify(fullStatusPush)))
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      mqtt.stop()
+    })
+
+    it('resyncs via REST at once when the getAll publish fails', async () => {
+      const { rest, clients, mqtt } = setup()
+      await mqtt.start()
+      clients[0].publishError = new Error('not authorized to publish')
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      mqtt.stop()
+    })
+
+    it('resyncs via REST at once when reconnecting after an outage, so commands are not refused as offline', async () => {
+      // A failed poll during the outage cleared cloudConnected. getAll's full status does not
+      // restore it, and healthy push widens polling to 5 minutes, so without an immediate REST
+      // resync every HomeKit write would be refused as "offline" for that long.
+      const { state, rest, clients, mqtt } = setup()
+      state.setCloudConnected(false)
+      await mqtt.start()
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      expect(state.cloudConnected).toBe(true)
+      mqtt.stop()
+    })
+
+    it('a dropped connection cancels the pending fallback', async () => {
+      const { rest, clients, mqtt } = setup()
+      await mqtt.start()
+      clients[0].emit('connect')
+      clients[0].emit('close')
+      await vi.advanceTimersByTimeAsync(15_000)
+      // Only the reconnected client's own fallback may fire later, never the dead one's.
+      expect(rest.getStatus).not.toHaveBeenCalled()
+      mqtt.stop()
+    })
   })
 
   it('reconnects with exponential backoff (0.5s, 1s, 2s, ...) that actually caps at 60s, resetting after a success', async () => {
@@ -535,6 +623,164 @@ describe('neoMqtt', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     // stop() must prevent any further reconnect attempts.
     expect(impl).toHaveBeenCalledTimes(1)
+  })
+
+  it('a late socket error on a discarded client never throws (no listener would crash the bridge)', async () => {
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+
+    await mqtt.start()
+    clients[0].emit('connect')
+    await vi.advanceTimersByTimeAsync(0)
+    // A dropped connection discards the client via the failure path...
+    clients[0].emit('close')
+    const lateError = Object.assign(new Error('write ECONNRESET'), { code: 'ECONNRESET' })
+    // ...and mqtt.js's streamErrorHandler can still re-emit a coded socket error afterwards.
+    expect(() => clients[0].emit('error', lateError)).not.toThrow()
+
+    // The same must hold for a client discarded by stop().
+    await vi.advanceTimersByTimeAsync(1000)
+    const live = clients.at(-1)!
+    mqtt.stop()
+    expect(() => live.emit('error', lateError)).not.toThrow()
+  })
+
+  it('repairs the cloud\'s invalid \\\' apostrophe escapes instead of dropping the payload (upstream ActronAirAPI 78e12ff)', async () => {
+    const state = new NeoState()
+    state.replace(restStatus.lastKnownState)
+    const rest = buildRest()
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    clients[0].emit('connect')
+    await vi.advanceTimersByTimeAsync(0)
+    rest.getStatus.mockClear()
+
+    const base = `actron-cloud/${CONNECTION_DETAILS.UserId}/neo/${SERIAL.toLowerCase()}/mwc`
+    // Exactly what the broker sends for a zone named Kurt's Office: \' is not legal JSON.
+    const raw = String.raw`{"event":{"RemoteZoneInfo[0].NV_Title":"Kurt\'s Office","UserAirconSettings.TemperatureSetpoint_Cool_oC":21.5}}`
+    expect(() => JSON.parse(raw)).toThrow()
+    clients[0].emit('message', `${base}/status-change`, Buffer.from(raw))
+
+    expect(state.get('UserAirconSettings.TemperatureSetpoint_Cool_oC')).toBe(21.5)
+    expect(rest.getStatus).not.toHaveBeenCalled()
+    mqtt.stop()
+  })
+
+  it('leaves valid JSON escapes (including an escaped backslash before an apostrophe) untouched', async () => {
+    const { parseCloudJson } = await import('../src/neo/mqtt.js')
+    expect(parseCloudJson(String.raw`{"a":"C:\\'x"}`)).toEqual({ a: String.raw`C:\'x` })
+    expect(parseCloudJson(String.raw`{"a":"q\"\n"}`)).toEqual({ a: 'q"\n' })
+  })
+
+  it('resyncs via REST when a payload is unparseable even after repair, so push cannot mask a stale state', async () => {
+    const state = new NeoState()
+    state.replace(restStatus.lastKnownState)
+    const rest = buildRest()
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: rest as never,
+      auth: buildAuth() as never,
+      state,
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    clients[0].emit('connect')
+    await vi.advanceTimersByTimeAsync(0)
+    rest.getStatus.mockClear()
+
+    const base = `actron-cloud/${CONNECTION_DETAILS.UserId}/neo/${SERIAL.toLowerCase()}/mwc`
+    clients[0].emit('message', `${base}/full-status`, Buffer.from('{not json'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(rest.getStatus).toHaveBeenCalledTimes(1)
+    mqtt.stop()
+  })
+
+  it('discarding a client keeps mqtt.js\'s own internal listeners (its close handler clears connackTimer)', async () => {
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    const client = clients[0]
+    const ownCloseListeners = client.listenerCount('close')
+    expect(ownCloseListeners).toBe(2) // mqtt.js's + ours
+
+    mqtt.stop()
+    // Ours is gone, the library's survives, so the stream's eventual 'close' still cleans up.
+    expect(client.listenerCount('close')).toBe(1)
+    client.emit('close')
+    expect(client.internalCloseRuns).toBe(1)
+    // And none of our handlers fire on the discarded client.
+    expect(client.listenerCount('message')).toBe(0)
+    expect(client.listenerCount('connect')).toBe(0)
+  })
+
+  it('stop() during the synchronous connect call discards the brand-new client', async () => {
+    const clients: FakeClient[] = []
+    let mqtt!: NeoMqtt
+    const impl = vi.fn(() => {
+      const client = new FakeClient()
+      clients.push(client)
+      mqtt.stop() // shutdown lands while the socket is being created
+      return client
+    })
+    mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    expect(clients[0].ended).toBe(true)
+    expect(clients[0].listenerCount('message')).toBe(0)
+  })
+
+  it('a superseded client failing late is cleaned up without touching the current one', async () => {
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    // The first client errors (handled), then a reconnect creates a second one.
+    clients[0].emit('error', Object.assign(new Error('ECONNREFUSED'), { code: 'ECONNREFUSED' }))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(clients).toHaveLength(2)
+    const old = clients[0]
+    // Re-attach a listener the way a stale closure still holds it, then fire it late.
+    clients[1].emit('connect')
+    old.emit('close')
+    expect(clients[1].ended).toBe(false)
+    expect(mqtt.healthy).toBe(true)
+    mqtt.stop()
   })
 
   it('resets the backoff on stop(), so a stop/start cycle does not inherit a stale 60s wait', async () => {

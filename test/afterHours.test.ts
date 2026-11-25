@@ -1,5 +1,6 @@
 import type { StatusTree } from '../src/neo/schemas.js'
 import { readFileSync } from 'node:fs'
+import { HAPStatus } from 'homebridge'
 import { describe, expect, it, vi } from 'vitest'
 import { AfterHoursAccessory } from '../src/accessories/afterHours.js'
 import { StatusResponseSchema } from '../src/neo/schemas.js'
@@ -103,6 +104,7 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
     state,
     commands,
     log,
+    serial: 'NEO000000',
     cfg: {},
     Service: { AccessoryInformation: 'AccessoryInformation', Valve: 'Valve' },
     Characteristic: {
@@ -113,9 +115,10 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
       InUse: 'InUse',
       ValveType: 'ValveType',
       SetDuration: 'SetDuration',
+      SerialNumber: 'SerialNumber',
     },
     api: {
-      hap: { HapStatusError: class HapStatusError extends Error {} },
+      hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {} },
     },
   } as never
 }
@@ -136,6 +139,12 @@ function build(initialTree: StatusTree, cloudConnected = true) {
 }
 
 describe('afterHoursAccessory', () => {
+  it('has a unique serial number matching its Matter counterpart', () => {
+    const { accessory } = build(tree({} as never))
+    const info = (accessory as unknown as FakeAccessory).getService('AccessoryInformation')!
+    expect(info.getCharacteristic('SerialNumber').value).toBe('NEO000000-after-hours')
+  })
+
   it('reads AfterHours.Enabled', () => {
     const { afterHours } = build(tree({ Enabled: true }))
     expect(afterHours.getActive()).toBe(1)

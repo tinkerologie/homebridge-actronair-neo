@@ -1,7 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
 import type { DisposableAccessory } from './disposable.js'
-import { HAPStatus } from 'homebridge'
 import { getUsableMasterHumidity, getUsableMasterTemp, resolveSetpointBounds } from '../neo/capabilities.js'
 import { ClimateMode, CompressorMode, FanMode, NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
@@ -33,6 +32,18 @@ const FAN_COMMAND: Partial<Record<FanMode, NeoCommand>> = {
   [FanMode.MEDIUM]: NeoCommand.FAN_MODE_MEDIUM,
   [FanMode.HIGH]: NeoCommand.FAN_MODE_HIGH,
   [FanMode.AUTO]: NeoCommand.FAN_MODE_AUTO,
+}
+
+/**
+ * The same speeds with the continuous-fan flag. The slider only picks a speed, so it must carry
+ * whatever +CONT state the unit is already in: sending the plain command would silently switch
+ * Continuous Mode off every time the user nudged the speed (the Matter fan already preserves it).
+ */
+const FAN_COMMAND_CONT: Partial<Record<FanMode, NeoCommand>> = {
+  [FanMode.LOW]: NeoCommand.FAN_MODE_LOW_CONT,
+  [FanMode.MEDIUM]: NeoCommand.FAN_MODE_MEDIUM_CONT,
+  [FanMode.HIGH]: NeoCommand.FAN_MODE_HIGH_CONT,
+  [FanMode.AUTO]: NeoCommand.FAN_MODE_AUTO_CONT,
 }
 
 /** One RotationSpeed band per supported fan speed, in ascending order. */
@@ -349,7 +360,7 @@ export class MasterAccessory implements DisposableAccessory {
   private checkHvacComms(): void {
     if (!this.platform.state.cloudConnected) {
       this.platform.log.error('Master Controller is offline. Check Master Controller Internet/Wifi connection')
-      throw new this.platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
     }
   }
 
@@ -548,7 +559,11 @@ export class MasterAccessory implements DisposableAccessory {
     }
 
     const band = this.fanBands.find(b => numericValue <= b.max) ?? this.fanBands[this.fanBands.length - 1]
-    assertCommandSuccess(this.platform, await this.platform.commands.run(FAN_COMMAND[band.speed] ?? NeoCommand.FAN_MODE_LOW))
+    const continuous = this.platform.state.get<string>(WATCHED.fanMode)?.endsWith('+CONT') ?? false
+    const command = continuous
+      ? FAN_COMMAND_CONT[band.speed] ?? NeoCommand.FAN_MODE_LOW_CONT
+      : FAN_COMMAND[band.speed] ?? NeoCommand.FAN_MODE_LOW
+    assertCommandSuccess(this.platform, await this.platform.commands.run(command))
     this.platform.log.debug(`Set Master Fan Mode (bands: ${this.fanBands.map(b => `${b.speed}<=${b.max}`).join(', ')}) -> `, value)
   }
 

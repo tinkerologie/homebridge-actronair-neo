@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { NeoAuthRevokedError } from '../src/neo/auth.js'
-import { NeoApiError, NeoRest } from '../src/neo/rest.js'
+import { NeoApiError, NeoNoStatusError, NeoRest } from '../src/neo/rest.js'
 
 const restStatus = JSON.parse(readFileSync('test/fixtures/rest-status.json', 'utf8'))
 const log = {
@@ -42,6 +42,46 @@ function spyOnInstantSetTimeout() {
 }
 
 describe('neoRest', () => {
+  it('reports a system with no last-known state (a retired controller) as NeoNoStatusError', async () => {
+    const { rest } = make(vi.fn(async () => ok({ isOnline: false, lastKnownState: null })) as never)
+    const error = await rest.getStatus('dead01').catch(e => e)
+    expect(error).toBeInstanceOf(NeoNoStatusError)
+    expect(error).toBeInstanceOf(NeoApiError)
+    expect(error.message).toMatch(/dead01/)
+  })
+
+  it('close() aborts a pending rate-limit wait at once, so shutdown is never held up for up to 60s', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}', {
+      status: 429,
+      headers: { 'Retry-After': '60' },
+    }))
+    const { rest } = make(fetchImpl as never)
+    const pending = rest.getStatus('neo000000').catch(e => e)
+    await new Promise(r => setTimeout(r, 10)) // now parked in the 60s Retry-After wait
+    const started = Date.now()
+    rest.close()
+    const error = await pending
+    expect(error).toBeInstanceOf(NeoApiError)
+    expect(error.message).toMatch(/shutting down/i)
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('close() aborts an in-flight request and refuses new ones', async () => {
+    let seen: AbortSignal | undefined
+    const fetchImpl = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      seen = init.signal as AbortSignal
+      seen.addEventListener('abort', () => reject(seen!.reason))
+    }))
+    const { rest } = make(fetchImpl as never)
+    const pending = rest.getStatus('neo000000').catch(e => e)
+    await new Promise(r => setTimeout(r, 0))
+    rest.close()
+    expect(seen?.aborted).toBe(true)
+    expect(await pending).toBeInstanceOf(NeoApiError)
+    await expect(rest.getStatus('neo000000')).rejects.toThrow(/shutting down/i)
+  })
+
   it('returns a parsed status response', async () => {
     const { rest } = make(vi.fn(async () => ok(restStatus)) as unknown as typeof fetch)
     const parsed = await rest.getStatus('neo000000')

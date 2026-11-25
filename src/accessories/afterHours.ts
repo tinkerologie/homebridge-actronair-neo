@@ -1,7 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
 import type { DisposableAccessory } from './disposable.js'
-import { HAPStatus } from 'homebridge'
 import { NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
 
@@ -56,6 +55,8 @@ export class AfterHoursAccessory implements DisposableAccessory {
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Actron')
       .setCharacteristic(this.platform.Characteristic.Model, `${this.platform.capabilities?.model ?? 'ActronAir Neo'} After Hours`)
+      // Unique per accessory, matching the Matter valve's, instead of HAP's "Default-SerialNumber".
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, `${this.platform.serial}-after-hours`)
 
     const service = this.accessory.getService(this.platform.Service.Valve)
       ?? this.accessory.addService(this.platform.Service.Valve)
@@ -103,7 +104,7 @@ export class AfterHoursAccessory implements DisposableAccessory {
 
   async setActive(value: CharacteristicValue): Promise<void> {
     if (!this.platform.state.cloudConnected)
-      throw new this.platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
 
     const on = !!value
     assertCommandSuccess(this.platform, await this.platform.commands.run(on ? NeoCommand.AFTER_HOURS_ON : NeoCommand.AFTER_HOURS_OFF))
@@ -112,7 +113,7 @@ export class AfterHoursAccessory implements DisposableAccessory {
 
   async setDuration(value: CharacteristicValue): Promise<void> {
     if (!this.platform.state.cloudConnected)
-      throw new this.platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
 
     const minutes = Math.round((value as number) / SECONDS_PER_MINUTE)
     const duration = Math.min(MAX_DURATION_MIN, Math.max(MIN_DURATION_MIN, minutes))

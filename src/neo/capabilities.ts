@@ -132,6 +132,34 @@ export function getUserSetpointLimits(state: NeoState): UserSetpointLimits | und
 }
 
 /**
+ * The band a zone setpoint must stay within around the master's, for one mode. Shared by the
+ * HAP and Matter zones. Only a *non-zero* value is a real constraint, and it is read from the
+ * device, never assumed:
+ *
+ * 1. NV_Limits.UserSetpoint_oC.VarianceAbove/BelowMaster* when either is non-zero (per mode,
+ *    possibly asymmetric; these carry meaning on Que-style firmware).
+ * 2. Otherwise the symmetric UserAirconSettings.ZoneTemperatureSetpointVariance_oC, which is
+ *    what the Neo app itself enforces; Neo reports every NV_Limits variance as 0 (confirmed on
+ *    a live NTW-1000: all four 0, this field 2). Upstream ActronAirAPI 96e8a31 does the same.
+ * 3. Neither non-zero: no constraint relative to the master.
+ */
+export function resolveZoneVariance(
+  state: NeoState,
+  variance: (limits: UserSetpointLimits) => [below: number | undefined, above: number | undefined],
+): [below: number, above: number] {
+  const limits = getUserSetpointLimits(state)
+  const [below = 0, above = 0] = limits
+    ? variance(limits)
+    : []
+  if (below > 0 || above > 0)
+    return [below, above]
+  const symmetric = state.get<number>('UserAirconSettings.ZoneTemperatureSetpointVariance_oC') ?? 0
+  return symmetric > 0
+    ? [symmetric, symmetric]
+    : [0, 0]
+}
+
+/**
  * Setpoint bounds for the master (no zoneIndex) or a zone, resolved device-first:
  * per-zone Min/MaxSetpoint (most firmwares omit them) → the device's NV_Limits →
  * DEFAULT_BOUNDS. Shared by both accessories so HomeKit can never offer the master a range

@@ -1,5 +1,6 @@
 import type { CharacteristicValue } from 'homebridge'
 import { readFileSync } from 'node:fs'
+import { HAPStatus } from 'homebridge'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ZoneAccessory } from '../src/accessories/zone.js'
 import { StatusResponseSchema } from '../src/neo/schemas.js'
@@ -60,7 +61,15 @@ class FakeCharacteristic {
   }
 
   setProps(p: Record<string, unknown>) {
-    this.props = p
+    this.props = {
+      ...this.props,
+      ...p,
+    }
+    return this
+  }
+
+  updateValue(v: CharacteristicValue) {
+    this.value = v
     return this
   }
 
@@ -142,6 +151,8 @@ interface MakePlatformOpts {
   rawLimits?: Record<string, string>
   /** Mutates the raw fixture (before schema parsing) — used to exercise sensor edge cases. */
   mutateRaw?: (raw: { lastKnownState: Record<string, never> }) => void
+  /** Supported climate modes, as NeoCapabilities reports them. Defaults to cool+heat+auto. */
+  modes?: { cool: boolean, heat: boolean, auto: boolean, fan?: boolean }
 }
 
 function makePlatform(opts: MakePlatformOpts = {}) {
@@ -183,12 +194,22 @@ function makePlatform(opts: MakePlatformOpts = {}) {
     commands,
     log,
     serial: 'NEO000000',
+    capabilities: { modes: opts.modes ?? {
+      cool: true,
+      heat: true,
+      auto: true,
+      fan: true,
+    } },
     cfg: {
       zonesAsHeaterCoolers: false,
       ...opts,
     },
     api: {
-      hap: { HapStatusError: FakeHapStatusError },
+      hap: {
+        HAPStatus,
+        HapStatusError: FakeHapStatusError,
+        Perms: { PAIRED_READ: 'pr', PAIRED_WRITE: 'pw', NOTIFY: 'ev' },
+      },
     },
   } as never
 
@@ -240,7 +261,7 @@ describe('zoneAccessory', () => {
     void new ZoneAccessory(platform, accessory as never, 0)
     const onChar = accessory.getService(ServiceTypes.Switch)!.getCharacteristic(CharacteristicTypes.On)
     // Fixture: EnabledZones[0] === true
-    expect(onChar.invokeGet()).toBe(1)
+    expect(onChar.invokeGet()).toBe(true)
   })
 
   it('exposes a HeaterCooler with humidity sensor when zonesAsHeaterCoolers is true', () => {
@@ -273,19 +294,56 @@ describe('zoneAccessory', () => {
     expect(commands.run).toHaveBeenCalledWith(NeoCommand.ZONE_COOL_SET_POINT, { coolTemp: 22, zoneIndex: 1 })
   })
 
-  it('variances all zero (the real fixture): a zone setpoint far from master is sent unchanged and the master is not pushed', async () => {
-    // Fixture NV_Limits.UserSetpoint_oC reports every VarianceXMasterY as 0 — no push, no
-    // clamp-to-master, only the absolute setCool_Min/Max (16/30) bound the value.
+  it('neo: honours the symmetric ZoneTemperatureSetpointVariance_oC (real fixture: 2) when every NV_Limits variance is 0', async () => {
+    // A live NTW-1000 and the fixture both report the NV_Limits.UserSetpoint_oC variances as 0
+    // and ZoneTemperatureSetpointVariance_oC as 2. The Neo app constrains zones with the latter
+    // (upstream ActronAirAPI 96e8a31), so a zone may not sit more than 2 degrees from the master.
     const { platform, commands } = makePlatform({ zonesAsHeaterCoolers: true })
     void new ZoneAccessory(platform, accessory as never, 0)
     const svc = accessory.getService(ServiceTypes.HeaterCooler)!
 
-    // Master cool setpoint is 22; 28 is far outside a hypothetical ±2 band but well within
-    // the device's actual absolute bounds, so it must pass through unmodified.
+    // Master cool setpoint is 22; 28 is outside [20, 24], so the master moves to 28 - 2 = 26.
+    await svc.getCharacteristic(CharacteristicTypes.CoolingThresholdTemperature).invokeSet(28)
+
+    expect(commands.run).toHaveBeenCalledWith(NeoCommand.COOL_SET_POINT, { coolTemp: 26 })
+    expect(commands.run).toHaveBeenCalledWith(NeoCommand.ZONE_COOL_SET_POINT, { coolTemp: 28, zoneIndex: 0 })
+  })
+
+  it.each([
+    ['zero', 0],
+    ['absent', undefined],
+  ])('no constraint when every variance is 0 and ZoneTemperatureSetpointVariance_oC is %s', async (_label, variance) => {
+    const { platform, commands } = makePlatform({
+      zonesAsHeaterCoolers: true,
+      mutateRaw: (raw) => {
+        const settings = raw.lastKnownState.UserAirconSettings as unknown as Record<string, unknown>
+        if (variance === undefined)
+          delete settings.ZoneTemperatureSetpointVariance_oC
+        else
+          settings.ZoneTemperatureSetpointVariance_oC = variance
+      },
+    })
+    void new ZoneAccessory(platform, accessory as never, 0)
+    const svc = accessory.getService(ServiceTypes.HeaterCooler)!
+
     await svc.getCharacteristic(CharacteristicTypes.CoolingThresholdTemperature).invokeSet(28)
 
     expect(commands.run).not.toHaveBeenCalledWith(NeoCommand.COOL_SET_POINT, expect.anything())
     expect(commands.run).toHaveBeenCalledWith(NeoCommand.ZONE_COOL_SET_POINT, { coolTemp: 28, zoneIndex: 0 })
+  })
+
+  it('a non-zero NV_Limits variance takes precedence over the symmetric field', async () => {
+    const { platform, commands } = makePlatform({
+      zonesAsHeaterCoolers: true,
+      limits: { VarianceAboveMasterCool: 3, VarianceBelowMasterCool: 3 },
+    })
+    void new ZoneAccessory(platform, accessory as never, 0)
+    const svc = accessory.getService(ServiceTypes.HeaterCooler)!
+
+    // [19, 25] from NV_Limits, not [20, 24]: 28 moves the master to 28 - 3 = 25.
+    await svc.getCharacteristic(CharacteristicTypes.CoolingThresholdTemperature).invokeSet(28)
+
+    expect(commands.run).toHaveBeenCalledWith(NeoCommand.COOL_SET_POINT, { coolTemp: 25 })
   })
 
   it('non-zero variance, target above the band: master is nudged by the variance offset (not to the target itself) so the band re-includes the zone value', async () => {
@@ -408,7 +466,7 @@ describe('zoneAccessory', () => {
         false,
       ],
     })
-    expect(onChar.value).toBe(0)
+    expect(onChar.value).toBe(false)
   })
 
   it('updates Active/CurrentHeaterCoolerState/TargetHeaterCoolerState when the master is turned off, even though nothing zone-specific changed', () => {
@@ -700,6 +758,89 @@ describe('zoneAccessory sensors (battery, temperature, humidity)', () => {
       .getCharacteristic(CharacteristicTypes.CoolingThresholdTemperature)
     // Fixture master cool setpoint is 23 with a ±2 band once the variance is non-zero.
     await expect(cool.invokeSet(29)).rejects.toBeTruthy()
+  })
+})
+
+describe('zoneAccessory HAP value hygiene', () => {
+  let accessory: FakeAccessory
+  beforeEach(() => {
+    accessory = new FakeAccessory('Zone A')
+  })
+
+  it('threshold getters never serve a value outside the characteristic range (no bare 0)', () => {
+    const { platform, state } = makePlatform({ zonesAsHeaterCoolers: true })
+    void new ZoneAccessory(platform, accessory as never, 0)
+    const svc = accessory.getService(ServiceTypes.HeaterCooler)!
+    const heat = svc.getCharacteristic(CharacteristicTypes.HeatingThresholdTemperature)
+    const cool = svc.getCharacteristic(CharacteristicTypes.CoolingThresholdTemperature)
+
+    state.applyDelta({ 'RemoteZoneInfo[0].TemperatureSetpoint_Heat_oC': 99, 'RemoteZoneInfo[0].TemperatureSetpoint_Cool_oC': 1 })
+    expect(heat.invokeGet()).toBe(heat.props.maxValue)
+    expect(cool.invokeGet()).toBe(cool.props.minValue)
+  })
+
+  it('threshold getters fall back to the range minimum, not 0, when the zone reports no setpoint', () => {
+    const { platform } = makePlatform({
+      zonesAsHeaterCoolers: true,
+      mutateRaw: (raw) => {
+        const zone = (raw.lastKnownState.RemoteZoneInfo as unknown as Record<string, unknown>[])[0]
+        delete zone.TemperatureSetpoint_Heat_oC
+        delete zone.TemperatureSetpoint_Cool_oC
+      },
+    })
+    void new ZoneAccessory(platform, accessory as never, 0)
+    const svc = accessory.getService(ServiceTypes.HeaterCooler)!
+    const heat = svc.getCharacteristic(CharacteristicTypes.HeatingThresholdTemperature)
+    const cool = svc.getCharacteristic(CharacteristicTypes.CoolingThresholdTemperature)
+    expect(heat.invokeGet()).toBe(heat.props.minValue)
+    expect(cool.invokeGet()).toBe(cool.props.minValue)
+    // Seeded right after setProps, so HAP never holds its out-of-range default either.
+    expect(heat.value).toBe(heat.props.minValue)
+  })
+
+  it('target mode is a read-only mirror limited to the modes the unit supports', () => {
+    const { platform, state } = makePlatform({
+      zonesAsHeaterCoolers: true,
+      modes: { cool: true, heat: false, auto: false },
+    })
+    void new ZoneAccessory(platform, accessory as never, 0)
+    const target = accessory.getService(ServiceTypes.HeaterCooler)!.getCharacteristic(CharacteristicTypes.TargetHeaterCoolerState)
+    expect(target.props.validValues).toEqual([CharacteristicTypes.TargetHeaterCoolerState.COOL])
+    expect(target.props.perms).toEqual(['pr', 'ev'])
+    // Even if the master reports a mode outside validValues, the getter never serves it.
+    state.applyDelta({ 'UserAirconSettings.Mode': 'HEAT' })
+    expect(target.invokeGet()).toBe(CharacteristicTypes.TargetHeaterCoolerState.COOL)
+  })
+
+  it('switch mode serves On as a boolean (its HAP format)', () => {
+    const { platform, state } = makePlatform()
+    const zone = new ZoneAccessory(platform, accessory as never, 0)
+    state.applyDelta({
+      'UserAirconSettings.EnabledZones': [
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ],
+    })
+    expect(zone.getEnableState()).toBe(true)
+    state.applyDelta({
+      'UserAirconSettings.EnabledZones': [
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+      ],
+    })
+    expect(zone.getEnableState()).toBe(false)
   })
 })
 

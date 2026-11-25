@@ -20,6 +20,20 @@ describe('parseConfig', () => {
     expect(() => parseConfig({ refreshInterval })).toThrow(/refreshInterval/)
   })
 
+  it.each([1, 5, 9])('clamps a refresh interval of %ss up to the 10s floor, with a warning', (refreshInterval) => {
+    const cfg = parseConfig({ refreshInterval })
+    expect(cfg.refreshInterval).toBe(10)
+    expect(cfg.refreshIntervalMs).toBe(10_000)
+    expect(cfg.warnings).toEqual([
+      expect.stringMatching(/refreshInterval.*10/),
+    ])
+  })
+
+  it('reports no warnings for an in-range config', () => {
+    expect(parseConfig({ refreshInterval: 10 }).warnings).toEqual([])
+    expect(parseConfig({}).warnings).toEqual([])
+  })
+
   it('rejects a non-numeric refreshInterval', () => {
     expect(() => parseConfig({ platform: 'ActronAirNeo', name: 'x', refreshInterval: 'soon' }))
       .toThrow(/refreshInterval/)
@@ -76,7 +90,8 @@ describe('config.schema.json form visibility', () => {
       if (Object.hasOwn(property as object, 'default'))
         expect((property as { default: unknown }).default).toEqual(defaults[key])
     }
-    expect(props.refreshInterval.minimum).toBe(1)
+    // The form floor matches the runtime clamp, so the UI cannot offer a value that gets rewritten.
+    expect(props.refreshInterval.minimum).toBe(10)
   })
 
   it.each(['refreshToken', 'deviceSerial', 'clientId'])(

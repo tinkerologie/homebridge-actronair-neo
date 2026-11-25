@@ -1,5 +1,4 @@
 import type { ActronAirNeoPlatform } from '../platform.js'
-import { HAPStatus } from 'homebridge'
 import { CommandResult } from '../neo/types.js'
 
 /**
@@ -14,5 +13,5 @@ import { CommandResult } from '../neo/types.js'
  */
 export function assertCommandSuccess(platform: ActronAirNeoPlatform, result: CommandResult): void {
   if (result !== CommandResult.SUCCESS)
-    throw new platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+    throw new platform.api.hap.HapStatusError(platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
 }

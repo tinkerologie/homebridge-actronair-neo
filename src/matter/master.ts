@@ -3,6 +3,7 @@ import type { ActronAirNeoPlatform, Discovered } from '../platform.js'
 import type { MatterBinding } from './types.js'
 import { getUsableMasterHumidity, getUsableMasterTemp, resolveSetpointBounds } from '../neo/capabilities.js'
 import { ClimateMode, FanMode, NeoCommand } from '../neo/types.js'
+import { clampSetpoint, thermostatLimits } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -57,8 +58,15 @@ export function buildMasterMatterAccessory(
   const matter = platform.api.matter!
   const uuid = matter.uuid.generate(`matter:${device.id}`)
 
-  const heatBounds = resolveSetpointBounds(platform.state, 'heat')
-  const coolBounds = resolveSetpointBounds(platform.state, 'cool')
+  const limits = thermostatLimits(
+    resolveSetpointBounds(platform.state, 'heat'),
+    resolveSetpointBounds(platform.state, 'cool'),
+  )
+  // FanControl's Auto mode is feature-gated: Homebridge only adds the feature for a
+  // fanModeSequence offering Auto, and matter.js rejects fanMode Auto without it - at
+  // registration that fails the whole endpoint.
+  const fanSpeeds = platform.capabilities?.fanSpeeds ?? []
+  const autoFan = fanSpeeds.includes(FanMode.AUTO)
 
   function getSystemMode(): MatterSystemMode {
     const isOn = platform.state.get<boolean>('UserAirconSettings.isOn')
@@ -97,16 +105,18 @@ export function buildMasterMatterAccessory(
         return { fanMode: MatterFanMode.High, percentSetting: 100, percentCurrent: 100 }
       case FanMode.AUTO:
       default:
-        return { fanMode: MatterFanMode.Auto, percentSetting: 100, percentCurrent: 100 }
+        return autoFan
+          ? { fanMode: MatterFanMode.Auto, percentSetting: 100, percentCurrent: 100 }
+          : { fanMode: MatterFanMode.High, percentSetting: 100, percentCurrent: 100 }
     }
   }
 
   const liveTemp = getUsableMasterTemp(platform.state)
   const initialTemp = liveTemp !== undefined
     ? Math.round(liveTemp * 100)
-    : 2100
-  const initialHeatSetpoint = Math.round((platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Heat_oC') ?? 20) * 100)
-  const initialCoolSetpoint = Math.round((platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Cool_oC') ?? 24) * 100)
+    : null
+  const initialHeatSetpoint = clampSetpoint(platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Heat_oC') ?? 20, limits.heat)
+  const initialCoolSetpoint = clampSetpoint(platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Cool_oC') ?? 24, limits.cool)
 
   const parts: MatterAccessoryPart[] = []
 
@@ -119,7 +129,7 @@ export function buildMasterMatterAccessory(
     clusters: {
       fanControl: {
         fanMode: initialFanState.fanMode,
-        fanModeSequence: resolveFanModeSequence(platform.capabilities?.fanSpeeds ?? []),
+        fanModeSequence: resolveFanModeSequence(fanSpeeds),
         percentSetting: initialFanState.percentSetting,
         percentCurrent: initialFanState.percentCurrent,
         speedMax: 3,
@@ -187,7 +197,9 @@ export function buildMasterMatterAccessory(
   })
 
   // Humidity child part
+  // Parts are fixed at registration: one added here is the only one update() may target.
   const liveHumidity = getUsableMasterHumidity(platform.state)
+  const hasHumidityPart = liveHumidity !== undefined
   if (liveHumidity !== undefined) {
     parts.push({
       id: 'humidity',
@@ -215,14 +227,7 @@ export function buildMasterMatterAccessory(
         occupiedHeatingSetpoint: initialHeatSetpoint,
         occupiedCoolingSetpoint: initialCoolSetpoint,
         localTemperature: initialTemp,
-        minHeatSetpointLimit: heatBounds.min * 100,
-        maxHeatSetpointLimit: heatBounds.max * 100,
-        minCoolSetpointLimit: coolBounds.min * 100,
-        maxCoolSetpointLimit: coolBounds.max * 100,
-        absMinHeatSetpointLimit: 700,
-        absMaxHeatSetpointLimit: 3000,
-        absMinCoolSetpointLimit: 1600,
-        absMaxCoolSetpointLimit: 3200,
+        ...limits.attributes,
         minSetpointDeadBand: 0,
         controlSequenceOfOperation: 4,
       },
@@ -265,7 +270,7 @@ export function buildMasterMatterAccessory(
           if (!platform.state.cloudConnected) {
             throw new Error('ActronAir Master Controller is offline')
           }
-          const heatTemp = occupiedHeatingSetpoint / 100
+          const heatTemp = clampSetpoint(occupiedHeatingSetpoint / 100, limits.heat) / 100
           assertMatterCommandSuccess(platform, await platform.commands.run(NeoCommand.HEAT_SET_POINT, { heatTemp }))
           platform.log.debug(`Matter set Master Heating Setpoint -> ${heatTemp}`)
         },
@@ -273,7 +278,7 @@ export function buildMasterMatterAccessory(
           if (!platform.state.cloudConnected) {
             throw new Error('ActronAir Master Controller is offline')
           }
-          const coolTemp = occupiedCoolingSetpoint / 100
+          const coolTemp = clampSetpoint(occupiedCoolingSetpoint / 100, limits.cool) / 100
           assertMatterCommandSuccess(platform, await platform.commands.run(NeoCommand.COOL_SET_POINT, { coolTemp }))
           platform.log.debug(`Matter set Master Cooling Setpoint -> ${coolTemp}`)
         },
@@ -295,12 +300,12 @@ export function buildMasterMatterAccessory(
       if (all || changed.has('UserAirconSettings.TemperatureSetpoint_Heat_oC')) {
         const heat = platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Heat_oC')
         if (heat !== undefined)
-          thermostatUpdate.occupiedHeatingSetpoint = Math.round(heat * 100)
+          thermostatUpdate.occupiedHeatingSetpoint = clampSetpoint(heat, limits.heat)
       }
       if (all || changed.has('UserAirconSettings.TemperatureSetpoint_Cool_oC')) {
         const cool = platform.state.get<number>('UserAirconSettings.TemperatureSetpoint_Cool_oC')
         if (cool !== undefined)
-          thermostatUpdate.occupiedCoolingSetpoint = Math.round(cool * 100)
+          thermostatUpdate.occupiedCoolingSetpoint = clampSetpoint(cool, limits.cool)
       }
       if (all || changed.has('MasterInfo.LiveTemp_oC')) {
         const temp = getUsableMasterTemp(platform.state)
@@ -322,7 +327,7 @@ export function buildMasterMatterAccessory(
         })
       }
 
-      if (all || changed.has('MasterInfo.LiveHumidity_pc')) {
+      if (hasHumidityPart && (all || changed.has('MasterInfo.LiveHumidity_pc'))) {
         const hum = getUsableMasterHumidity(platform.state)
         platform.api.matter?.updateAccessoryState(
           uuid,

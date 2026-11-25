@@ -108,7 +108,7 @@ function makeHarness(tree: ReturnType<typeof baseTree>) {
     Characteristic,
     serial: 'ABC123',
     api: {
-      hap: { HapStatusError: class HapStatusError extends Error {
+      hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {
         constructor(public hapStatus: HAPStatus) { super(`HAP ${hapStatus}`) }
       } },
     },

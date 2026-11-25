@@ -122,6 +122,11 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    closure and exposes `dispose()`; the platform releases it after a replacement initializes, on removal,
    and on shutdown. Discovery must recheck shutdown after awaits before creating resources
    or registering accessories. Matter tracking is removed only after its API call succeeds.
+   Homebridge restores cached Matter endpoints with stub handlers and their cached cluster
+   values. Only `registerPlatformAccessories()` attaches the plugin's handlers, and
+   `updatePlatformAccessories()` only merges metadata. So each cached Matter accessory is
+   re-registered once per session (`matterRegistered` in `platform.ts`), and its live state is
+   pushed straight after, because `NeoState` already holds it and later polls see no diff.
 
 2. **`NeoState` (`src/neo/state.ts`) is the single authoritative tree.** Its change set reports
    **leaf paths, including when an optional subtree appears or disappears wholesale** — `diffPaths`
@@ -175,14 +180,17 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    this backwards wipes the user's HomeKit rooms and automations, and that's unrecoverable
    for them.
 
-6. **Zone setpoint limits come from the device's reported `NV_Limits.UserSetpoint_oC`**,
-   not a hardcoded band (`src/accessories/zone.ts#resolveZoneSetpoint`). A variance
-   (`VarianceAboveMasterCool` etc.) is honoured only when non-zero — zero, or the field
-   being absent, means "no constraint relative to the master" for that firmware. When
-   a zone value falls outside the permitted variance, the master setpoint is nudged rather
-   than the zone value being clamped. A fixed ±2°C band is a plausible-sounding
-   rule that some documentation elsewhere describes; it is not what the device reports, so
-   don't introduce it.
+6. **Zone setpoint limits come from what the device reports**, never a hardcoded band.
+   Absolute bounds come from `NV_Limits.UserSetpoint_oC`. The band around the master comes
+   from `resolveZoneVariance()` (`src/neo/capabilities.ts`, shared by the HAP and Matter
+   zones): first `NV_Limits.UserSetpoint_oC.VarianceAbove/BelowMaster*` when either is
+   non-zero, otherwise the symmetric `UserAirconSettings.ZoneTemperatureSetpointVariance_oC`.
+   Neo reports every `NV_Limits` variance as 0 (confirmed on a live NTW-1000: all four 0,
+   the symmetric field 2), and the Neo app enforces the symmetric field (upstream
+   ActronAirAPI `96e8a31`). Only a non-zero value is a constraint; zero or absent means "no
+   constraint relative to the master". When a zone value falls outside the band, the master
+   setpoint is nudged rather than the zone value being clamped. Don't replace this with a
+   fixed ±2°C rule: the 2 seen in practice is a device-reported value that differs by unit.
 
 7. **Auth (`src/neo/auth.ts`) is OAuth2 device-code flow.** Only a non-rotating refresh
    token is persisted, and it lives in the plugin's `config.json` (written by the
@@ -199,6 +207,14 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    connect), never thrown. `platform.ts` widens its poll interval to a 5-minute safety-net
    cadence while `NeoMqtt.healthy` and snaps back to `refreshInterval` the instant it isn't,
    driven by `NeoMqtt`'s `onHealthChange` callback rather than waiting for the next poll tick.
+   On every connect it publishes `getAll` to `.../app/cmd`, as the Neo app does, and the
+   full-status answer refreshes state. A REST resync stays the guarantee: it runs at once if
+   the publish fails, or after 15s if no full status arrived. Don't drop the fallback, or a
+   change missed while disconnected could persist until the 5-minute safety-net poll. The
+   exception: when reconnecting while `cloudConnected` is false (a poll failed during the
+   outage), it resyncs from REST straight away instead of sending `getAll`. Only a REST
+   status's `isOnline` restores that flag, and healthy push widens polling to 5 minutes, so
+   waiting on `getAll` would leave every write refused as "offline" for that long.
    Client id is a **fresh random id with `clean: true` on every connect**, not a persisted
    stable one — matching the repo owner's own working Home Assistant integration against this
    same broker, which commented that there's no session worth resuming and a persistent

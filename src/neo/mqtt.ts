@@ -19,6 +19,11 @@ const MAX_BACKOFF_MS = 60_000
 
 /** No heart-beat message for this long means the push connection is not trustworthy, even if the socket looks open. */
 const HEARTBEAT_STALE_MS = 180_000
+/**
+ * How long a fresh connection waits for the unit's answer to `getAll` (a full-status push)
+ * before falling back to a REST resync. The answer normally lands within a second or two.
+ */
+const GET_ALL_FALLBACK_MS = 15_000
 
 export interface NeoMqttOptions {
   rest: NeoRest
@@ -33,6 +38,9 @@ export interface NeoMqttOptions {
   /** Fires whenever `healthy` transitions, so the caller (platform.ts) can re-time its poll loop immediately instead of waiting for the next scheduled tick. */
   onHealthChange?: (healthy: boolean) => void
 }
+
+/** Removes exactly the listeners `wire()` attached to a client, and nothing else. */
+const detachers = new WeakMap<MqttClient, () => void>()
 
 /**
  * MQTT push transport. Overlays the REST poll loop, it never replaces it: every failure
@@ -54,6 +62,8 @@ export class NeoMqtt {
   private backoffMs = MIN_BACKOFF_MS
   private reconnectTimer?: NodeJS.Timeout
   private staleTimer?: NodeJS.Timeout
+  /** Pending REST fallback for the current connection's getAll request. */
+  private getAllFallbackTimer?: NodeJS.Timeout
   private stopped = true
   private connected = false
   private isHealthy = false
@@ -80,6 +90,7 @@ export class NeoMqtt {
     this.backoffMs = MIN_BACKOFF_MS
     clearTimeout(this.reconnectTimer)
     clearTimeout(this.staleTimer)
+    clearTimeout(this.getAllFallbackTimer)
     this.setHealthy(false)
     this.endClient()
   }
@@ -88,10 +99,10 @@ export class NeoMqtt {
     const client = this.client
     this.client = undefined
     this.connected = false
+    clearTimeout(this.getAllFallbackTimer)
     if (!client)
       return
-    client.removeAllListeners()
-    client.end(true)
+    discardClient(client)
   }
 
   private setHealthy(next: boolean): void {
@@ -144,12 +155,13 @@ export class NeoMqtt {
     if (this.stopped)
       return
 
+    const clientId = `homebridge-actronair-neo-${randomUUID()}`
     let client: MqttClient
     try {
       client = this.connectImpl(`mqtts://${endpoint.Endpoint}:${endpoint.Port}`, {
         username: email ?? '',
         password: token,
-        clientId: `homebridge-actronair-neo-${randomUUID()}`,
+        clientId,
         clean: true,
         keepalive: 60,
         reconnectPeriod: 0, // we own reconnect/backoff below
@@ -168,17 +180,17 @@ export class NeoMqtt {
     }
 
     if (this.stopped) {
-      client.removeAllListeners()
-      client.end(true)
+      discardClient(client)
       return
     }
 
     this.client = client
-    this.wire(client, endpoint.UserId)
+    this.wire(client, endpoint.UserId, clientId)
   }
 
-  private wire(client: MqttClient, userId: string): void {
+  private wire(client: MqttClient, userId: string, clientId: string): void {
     const base = `actron-cloud/${userId}/neo/${this.opts.serial.toLowerCase()}/mwc`
+    const commandTopic = `actron-cloud/${userId}/neo/${this.opts.serial.toLowerCase()}/app/cmd`
     const topics = [
       `${base}/full-status`,
       `${base}/status-change`,
@@ -208,8 +220,7 @@ export class NeoMqtt {
       }
       else {
         // Stale closure from a superseded attempt — clean it up without touching this.client.
-        client.removeAllListeners()
-        client.end(true)
+        discardClient(client)
       }
       clearTimeout(this.staleTimer)
       this.setHealthy(false)
@@ -218,7 +229,7 @@ export class NeoMqtt {
       this.scheduleReconnect()
     }
 
-    client.on('connect', () => {
+    const onConnect = (): void => {
       this.connected = true
       this.backoffMs = MIN_BACKOFF_MS
       this.touchHeartbeat()
@@ -227,21 +238,49 @@ export class NeoMqtt {
         if (err)
           this.opts.log.debug(`MQTT subscribe failed: ${err.message}`)
       })
-      // Always resync on (re)connect: any state change missed while disconnected must not
-      // silently persist.
-      void this.resyncFromRest()
-    })
+      // Always refresh on (re)connect: any state change missed while disconnected must not
+      // silently persist. Ask the unit to push its full state (`getAll`, as the Neo app does on
+      // every connect; upstream ActronAirAPI 22f0238), which saves a REST call per reconnect
+      // against the ~20/min rate limit. REST stays the guarantee: if the publish fails, or no
+      // full status arrives in time, resync from REST as before.
+      clearTimeout(this.getAllFallbackTimer)
+      // Reconnecting after an outage: a failed poll cleared cloudConnected, and only a REST
+      // status (its isOnline) restores it. A full-status push does not, and healthy push widens
+      // polling to 5 minutes, so waiting on getAll would leave every write refused as "offline"
+      // for that long. REST answers both questions at once.
+      if (!this.opts.state.cloudConnected) {
+        void this.resyncFromRest()
+        return
+      }
+      this.getAllFallbackTimer = setTimeout(() => {
+        this.opts.log.debug('No full status after getAll, resyncing via REST')
+        void this.resyncFromRest()
+      }, GET_ALL_FALLBACK_MS)
+      const request = JSON.stringify({
+        command: { type: 'getAll' },
+        // The answer is routed back on a cmd-response topic scoped to this prefix.
+        correlationId: `${clientId}/${randomUUID()}`,
+        OptOutOfLogging: false,
+      })
+      client.publish(commandTopic, request, { qos: 0 }, (err) => {
+        if (!err)
+          return
+        this.opts.log.debug(`MQTT getAll publish failed, resyncing via REST: ${err.message}`)
+        clearTimeout(this.getAllFallbackTimer)
+        void this.resyncFromRest()
+      })
+    }
 
-    client.on('message', (topic, payload) => {
+    const onMessage = (topic: string, payload: Buffer): void => {
       try {
         this.handleMessage(topic, payload, base)
       }
       catch (error) {
         this.opts.log.debug(`MQTT message handling failed: ${(error as Error).message}`)
       }
-    })
+    }
 
-    client.on('error', (error: Error & { code?: number }) => {
+    const onError = (error: Error & { code?: number }): void => {
       // A numeric `code` here is an MQTT CONNACK reason code (see mqtt.js's ReasonCodes) —
       // "Not authorized" / "Bad username or password" / etc — not a plain socket errno. The
       // access token IS the MQTT password and does expire, so this is routine and expected
@@ -256,9 +295,20 @@ export class NeoMqtt {
         this.opts.log.debug(`MQTT error: ${error.message}`)
       }
       handleFailure()
-    })
+    }
 
-    client.on('close', () => handleFailure())
+    const onClose = (): void => handleFailure()
+
+    client.on('connect', onConnect)
+    client.on('message', onMessage)
+    client.on('error', onError)
+    client.on('close', onClose)
+    detachers.set(client, () => {
+      client.off('connect', onConnect)
+      client.off('message', onMessage)
+      client.off('error', onError)
+      client.off('close', onClose)
+    })
   }
 
   private handleMessage(topic: string, payload: Buffer, base: string): void {
@@ -269,10 +319,14 @@ export class NeoMqtt {
 
     let json: unknown
     try {
-      json = JSON.parse(payload.toString())
+      json = parseCloudJson(payload.toString())
     }
     catch {
-      this.opts.log.debug(`MQTT payload on ${topic} was not valid JSON`)
+      // Heartbeats keep push "healthy" (and polling at its slow safety-net cadence) even while
+      // every state payload is being dropped, so an unreadable one must trigger a resync rather
+      // than be ignored, or HomeKit could sit on stale state for up to five minutes.
+      this.opts.log.debug(`MQTT payload on ${topic} was not valid JSON, resyncing via REST`)
+      void this.resyncFromRest()
       return
     }
 
@@ -283,6 +337,8 @@ export class NeoMqtt {
         void this.resyncFromRest()
         return
       }
+      // A full status is the answer the getAll fallback waits for (or makes it moot anyway).
+      clearTimeout(this.getAllFallbackTimer)
       this.applyReplace(parsed.data.event, 'full-status push')
       return
     }
@@ -366,5 +422,49 @@ export class NeoMqtt {
     const delay = this.backoffMs
     this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS)
     this.reconnectTimer = setTimeout(() => void this.attemptConnect(), delay)
+  }
+}
+
+/**
+ * Tear a client down for good, in two parts:
+ *
+ * - Detach only *our* listeners. `removeAllListeners()` would also strip mqtt.js's own, and
+ *   its constructor-registered `'close'` handler is the only thing that clears `connackTimer`
+ *   and the keepalive manager on a connection that never got a CONNACK. Stripping it leaks a
+ *   30s timer per failed attempt and can hold the process open at shutdown.
+ * - Keep a no-op `'error'` sink. mqtt.js's `streamErrorHandler` re-emits any coded socket error
+ *   (ECONNRESET, EPIPE, ...) as a client `'error'`, which can still fire during or after
+ *   `end(true)`. Node throws an `'error'` event with no listener as an uncaught exception,
+ *   which takes the whole child bridge down.
+ */
+function discardClient(client: MqttClient): void {
+  detachers.get(client)?.()
+  detachers.delete(client)
+  client.on('error', () => {})
+  client.end(true)
+}
+
+/** A valid JSON escape (stepped over intact) or the cloud's invalid `\'`. */
+const ESCAPE_SEQUENCE = /\\(?:u[0-9a-fA-F]{4}|["\\/bfnrtu])|\\'/g
+
+/**
+ * `JSON.parse`, retrying once with the cloud's invalid apostrophe escapes repaired. The broker
+ * escapes `'` as `\'` (addslashes-style), which JSON forbids, so a zone named "Kurt's Office"
+ * makes every payload mentioning it unparseable. Valid escapes are matched only so they are
+ * stepped over intact (an escaped backslash followed by an apostrophe stays as it is). A
+ * well-formed payload is parsed strictly and never rewritten. Mirrors upstream ActronAirAPI's
+ * `loads_repairing_escapes` (78e12ff).
+ */
+export function parseCloudJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  }
+  catch (error) {
+    const repaired = text.replace(ESCAPE_SEQUENCE, match => match === '\\\''
+      ? '\''
+      : match)
+    if (repaired === text)
+      throw error
+    return JSON.parse(repaired)
   }
 }

@@ -17,7 +17,7 @@
 <section id="linking-view" class="panel" hidden>
   <h2 class="panel-title">Enter this code at ActronAir</h2>
   <p class="panel-lede">
-    Open <a id="verify-link" target="_blank" rel="noopener"></a>, sign in, and enter the code below.
+    Open <a id="verify-link" target="_blank" rel="noopener noreferrer"></a>, sign in, and enter the code below.
   </p>
 
   <div class="code-plate">
@@ -305,6 +305,7 @@
     }
 
     function renderCountdown(deadline) {
+      stopCountdown() // never leak a previous interval
       const el = document.getElementById('countdown')
       const tick = () => {
         const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000))
@@ -322,7 +323,13 @@
     // config.schema.json, but a custom UI suppresses that form unless it asks for it. Only show it
     // once an account is linked: before linking, none of those options do anything, and several
     // field descriptions refer to the linked-account controls above them.
+    // Bumped on every link start and every way out of the linking view. A poll loop that wakes
+    // up to find the counter moved on is stale (cancelled, or superseded by a newer Link click)
+    // and must exit without touching the UI, or it could abort the flow that replaced it.
+    let linkSession = 0
+
     function showUnlinked() {
+      linkSession++
       stopCountdown()
       homebridge.hideSchemaForm()
       showView('unlinked')
@@ -356,9 +363,9 @@
       }
       select.value = cfg.deviceSerial ?? info.systems[0]?.serial ?? ''
       select.onchange = async () => {
-        cfg.deviceSerial = select.value
-        await homebridge.updatePluginConfig(cfgArray)
-        await homebridge.savePluginConfig()
+        await saveConfig((c) => {
+          c.deviceSerial = select.value
+        })
       }
 
       // One system is the overwhelmingly common case: name it, don't ask about it. The
@@ -372,8 +379,19 @@
       showView('linked')
     }
 
-    async function saveConfig() {
-      await homebridge.updatePluginConfig(cfgArray)
+    /**
+     * Apply one change to the plugin's *current* config and save it. The page-load snapshot is
+     * not written back: the schema form below edits the same config, and saving the stale copy
+     * would silently discard whatever the user changed there since the page opened.
+     */
+    async function saveConfig(mutate) {
+      const latest = await homebridge.getPluginConfig()
+      const target = latest[0] ?? { platform: 'ActronAirNeo', name: 'ActronAir Neo' }
+      if (!latest.length)
+        latest.push(target)
+      mutate(target)
+      mutate(cfg) // keep this page's view in step
+      await homebridge.updatePluginConfig(latest)
       await homebridge.savePluginConfig()
     }
 
@@ -386,23 +404,29 @@
       if (!cfg.refreshToken)
         return showUnlinked()
       try {
-        const session = await homebridge.request('/session', {
+        // Token exchange and account lookup happen server-side; no access token comes back here.
+        const info = await homebridge.request('/linked-account', {
           clientId: cfg.clientId,
           refreshToken: cfg.refreshToken,
         })
-        if (session.state !== 'ok')
+        if (info.state !== 'ok')
           return showExpired()
-        const info = await homebridge.request('/account', { accessToken: session.accessToken })
+        if (info.refreshToken && info.refreshToken !== cfg.refreshToken) {
+          await saveConfig((c) => {
+            c.refreshToken = info.refreshToken
+          })
+        }
         showLinked(info)
       }
       catch (err) {
         // Only a cloud/network failure lands here; a genuinely invalid grant comes back as
-        // session.state !== 'ok' above and shows the re-link view instead.
+        // info.state !== 'ok' above and shows the re-link view instead.
         showCloudError(err)
       }
     }
 
     async function link() {
+      const session = ++linkSession
       let code
       try {
         code = await homebridge.request('/device-code', { clientId: cfg.clientId })
@@ -411,6 +435,8 @@
         homebridge.toast.error(err.message, 'Linking failed')
         return
       }
+      if (session !== linkSession)
+        return
 
       document.getElementById('user-code').textContent = code.user_code
       const link = document.getElementById('verify-link')
@@ -425,8 +451,8 @@
 
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, interval * 1000))
-        if (views.linking.hidden)
-          return // cancelled
+        if (session !== linkSession || views.linking.hidden)
+          return // cancelled or superseded
 
         let result
         try {
@@ -436,13 +462,18 @@
           })
         }
         catch (err) {
+          if (session !== linkSession)
+            return
           homebridge.toast.error(err.message, 'Linking failed')
           return showUnlinked()
         }
+        if (session !== linkSession)
+          return
 
         if (result.state === 'authorised') {
-          cfg.refreshToken = result.refreshToken
-          await saveConfig()
+          await saveConfig((c) => {
+            c.refreshToken = result.refreshToken
+          })
           homebridge.toast.success('Account linked', 'ActronAir Neo')
           await refreshLinkedView()
           return
@@ -454,14 +485,17 @@
         if (result.slowDown)
           interval += 5
       }
+      if (session !== linkSession)
+        return
       homebridge.toast.error('Timed out waiting for approval', 'Linking failed')
       showUnlinked()
     }
 
     async function unlink() {
-      delete cfg.refreshToken
-      delete cfg.deviceSerial
-      await saveConfig()
+      await saveConfig((c) => {
+        delete c.refreshToken
+        delete c.deviceSerial
+      })
       showUnlinked()
     }
 

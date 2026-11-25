@@ -30,6 +30,11 @@ export interface NeoAuthOptions {
 export class NeoAuth {
   private accessToken?: string
   private expiresAt = 0
+  /**
+   * Starts as the configured token. The cloud has not been seen to rotate it, but if a renewal
+   * ever returns a different one, the old one may stop working: use the new one from then on.
+   */
+  private refreshToken?: string
   private inFlight?: Promise<string>
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
@@ -37,6 +42,7 @@ export class NeoAuth {
   constructor(private readonly opts: NeoAuthOptions) {
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.refreshToken = opts.refreshToken
   }
 
   private get tokenUrl(): string {
@@ -115,12 +121,12 @@ export class NeoAuth {
   }
 
   private async refresh(): Promise<string> {
-    if (!this.opts.refreshToken)
+    if (!this.refreshToken)
       throw new NeoAuthRevokedError('no refresh token configured')
 
     const { status, json } = await this.postForm({
       grant_type: 'refresh_token',
-      refresh_token: this.opts.refreshToken,
+      refresh_token: this.refreshToken,
       client_id: this.opts.clientId,
     })
 
@@ -130,6 +136,12 @@ export class NeoAuth {
       throw new Error(`Token refresh failed (HTTP ${status})`)
 
     const token = TokenSchema.parse(json)
+    if (token.refresh_token && token.refresh_token !== this.refreshToken) {
+      // Not persisted: config.json keeps the old token and the settings page reads it from
+      // there, so say plainly what the user will need to do rather than promise a save.
+      this.opts.log.warn('ActronAir issued a new account token. It is used until Homebridge restarts; if the plugin cannot connect after a restart, re-link your account in the plugin settings.')
+      this.refreshToken = token.refresh_token
+    }
     this.accessToken = token.access_token
     this.expiresAt = Date.now() + token.expires_in * 1000
     this.opts.log.debug(`Access token renewed, valid for ${Math.round(token.expires_in / 3600)}h`)

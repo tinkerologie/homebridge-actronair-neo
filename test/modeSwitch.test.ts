@@ -1,5 +1,6 @@
 import type { StatusTree } from '../src/neo/schemas.js'
 import { readFileSync } from 'node:fs'
+import { HAPStatus } from 'homebridge'
 import { describe, expect, it, vi } from 'vitest'
 import { ModeSwitchAccessory } from '../src/accessories/modeSwitch.js'
 import { isTurboModeSupported } from '../src/neo/capabilities.js'
@@ -94,6 +95,7 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
     state,
     commands,
     log,
+    serial: 'NEO000000',
     cfg: {},
     Service: { AccessoryInformation: 'AccessoryInformation', Switch: 'Switch' },
     Characteristic: {
@@ -101,9 +103,10 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
       Model: 'Model',
       Name: 'Name',
       On: 'On',
+      SerialNumber: 'SerialNumber',
     },
     api: {
-      hap: { HapStatusError: class HapStatusError extends Error {} },
+      hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {} },
     },
   } as never
 }
@@ -140,10 +143,16 @@ describe('isTurboModeSupported', () => {
 })
 
 describe('modeSwitchAccessory', () => {
+  it('gives each switch a unique serial number matching its Matter counterpart', () => {
+    const { accessory } = build('quiet', tree({} as never))
+    const info = (accessory as unknown as FakeAccessory).getService('AccessoryInformation')!
+    expect(info.getCharacteristic('SerialNumber').value).toBe('NEO000000-quiet')
+  })
+
   describe('away', () => {
     it('reads AwayMode', () => {
       const { modeSwitch } = build('away', tree({ AwayMode: true } as never))
-      expect(modeSwitch.getOn()).toBe(1)
+      expect(modeSwitch.getOn()).toBe(true)
     })
 
     it('sends AWAY_MODE_ON / AWAY_MODE_OFF', async () => {
@@ -158,7 +167,7 @@ describe('modeSwitchAccessory', () => {
   describe('quiet', () => {
     it('reads QuietMode', () => {
       const { modeSwitch } = build('quiet', tree({ QuietMode: false } as never))
-      expect(modeSwitch.getOn()).toBe(0)
+      expect(modeSwitch.getOn()).toBe(false)
     })
 
     it('sends QUIET_MODE_ON / QUIET_MODE_OFF', async () => {
@@ -173,9 +182,9 @@ describe('modeSwitchAccessory', () => {
   describe('continuousFan', () => {
     it('derives state from the FanMode suffix', () => {
       const { modeSwitch, platform } = build('continuousFan', treeWithFanMode('HIGH+CONT'))
-      expect(modeSwitch.getOn()).toBe(1)
+      expect(modeSwitch.getOn()).toBe(true)
       platform.state.applyDelta({ 'UserAirconSettings.FanMode': 'HIGH' })
-      expect(modeSwitch.getOn()).toBe(0)
+      expect(modeSwitch.getOn()).toBe(false)
     })
 
     it('preserves MED speed when enabling continuous mode', async () => {
@@ -214,7 +223,7 @@ describe('modeSwitchAccessory', () => {
       const { modeSwitch } = build('turbo', tree({
         TurboMode: { Supported: true, Enabled: true },
       } as never))
-      expect(modeSwitch.getOn()).toBe(1)
+      expect(modeSwitch.getOn()).toBe(true)
     })
 
     it('sends TURBO_MODE_ON / TURBO_MODE_OFF', async () => {
@@ -240,7 +249,7 @@ describe('modeSwitchAccessory', () => {
     it('updates the characteristic when its own path changes', () => {
       const { platform, onCharacteristic } = build('away', tree({ AwayMode: false } as never))
       platform.state.applyDelta({ 'UserAirconSettings.AwayMode': true })
-      expect(onCharacteristic.value).toBe(1)
+      expect(onCharacteristic.value).toBe(true)
     })
 
     it('ignores changes to the other two switches’ paths', () => {
@@ -256,7 +265,7 @@ describe('modeSwitchAccessory', () => {
       const { platform, onCharacteristic } = build('quiet', tree({ QuietMode: false } as never))
       onCharacteristic.value = 'untouched'
       platform.state.replace(tree({ QuietMode: true } as never))
-      expect(onCharacteristic.value).toBe(1)
+      expect(onCharacteristic.value).toBe(true)
     })
   })
 

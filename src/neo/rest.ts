@@ -6,7 +6,7 @@ import {
   AcSystemsSchema,
   CommandResponseSchema,
   ConnectionDetailsSchema,
-  StatusResponseSchema,
+  RawStatusResponseSchema,
 } from './schemas.js'
 
 /** A handled API/transport failure. Callers degrade to cached state rather than crash. */
@@ -14,6 +14,17 @@ export class NeoApiError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'NeoApiError'
+  }
+}
+
+/**
+ * The cloud knows the system but has no state for it (`lastKnownState: null`), as for a
+ * retired controller still linked to the account. Distinct so discovery can skip it.
+ */
+export class NeoNoStatusError extends NeoApiError {
+  constructor(serial: string) {
+    super(`ActronAir system ${serial} has no reported status (it may have been replaced or retired). If your account has more than one system, set the System Serial in the plugin settings.`)
+    this.name = 'NeoNoStatusError'
   }
 }
 
@@ -62,11 +73,44 @@ export class NeoRest {
   private readonly fetchImpl: typeof fetch
   private readonly retryDelayMs: number
   private readonly timeoutMs: number
+  /** Aborted by close(): cancels in-flight fetches and retry waits at shutdown. */
+  private readonly lifetime = new AbortController()
 
   constructor(private readonly opts: NeoRestOptions) {
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch
     this.retryDelayMs = opts.retryDelayMs ?? 3000
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  }
+
+  /**
+   * Stop for good (Homebridge shutdown). Aborts any in-flight request and any retry wait, and
+   * makes every later request fail at once, so a 60s Retry-After or a slow fetch cannot hold the
+   * process open or fire a request after shutdown.
+   */
+  close(): void {
+    this.lifetime.abort()
+  }
+
+  private assertOpen(): void {
+    if (this.lifetime.signal.aborted)
+      throw new NeoApiError('ActronAir cloud client is shutting down')
+  }
+
+  /** setTimeout that resolves early (by throwing) when close() is called. */
+  private async wait(ms: number): Promise<void> {
+    this.assertOpen()
+    const signal = this.lifetime.signal
+    await new Promise<void>((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const done = (): void => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', done)
+        resolve()
+      }
+      signal.addEventListener('abort', done, { once: true })
+      timer = setTimeout(done, ms)
+    })
+    this.assertOpen()
   }
 
   async getSystems() {
@@ -82,10 +126,14 @@ export class NeoRest {
   }
 
   async getStatus(serial: string) {
-    return this.request(
+    const status = await this.request(
       `api/v0/client/ac-systems/status/latest?serial=${encodeURIComponent(serial)}`,
-      StatusResponseSchema,
+      RawStatusResponseSchema,
     )
+    const { lastKnownState } = status
+    if (lastKnownState === null)
+      throw new NeoNoStatusError(serial)
+    return { ...status, lastKnownState }
   }
 
   async sendCommand(serial: string, command: object) {
@@ -112,6 +160,7 @@ export class NeoRest {
     // rate-limit wait (tracked separately via `retries429`), do not consume it, so either
     // landing on the final 5xx attempt still gets its own retry.
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      this.assertOpen()
       // Auth failures (e.g. a revoked grant) are not transport failures — let them
       // propagate as themselves so callers can tell "cloud unreachable" from "re-link account".
       const token = await this.opts.auth.getAccessToken()
@@ -128,10 +177,14 @@ export class NeoRest {
               : {}),
           },
           body: init.body,
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: AbortSignal.any([
+            AbortSignal.timeout(this.timeoutMs),
+            this.lifetime.signal,
+          ]),
         })
       }
       catch (error) {
+        this.assertOpen()
         // Network-level failure: log and let the caller serve cached state.
         throw new NeoApiError(`Cannot reach the ActronAir cloud: ${(error as Error).message}`)
       }
@@ -153,14 +206,14 @@ export class NeoRest {
         retries429++
         const delay = parseRetryAfterMs(res.headers.get('Retry-After'), this.retryDelayMs)
         this.opts.log.debug(`ActronAir cloud rate-limited (429), retrying in ${delay}ms (${retries429}/${MAX_429_RETRIES})`)
-        await new Promise(r => setTimeout(r, delay))
+        await this.wait(delay)
         attempt-- // don't spend a 5xx-retry attempt on a 429 wait
         continue
       }
 
       if (res.status >= 500 && attempt < MAX_ATTEMPTS) {
         this.opts.log.debug(`ActronAir cloud returned ${res.status}, retrying (${attempt}/${MAX_ATTEMPTS})`)
-        await new Promise(r => setTimeout(r, this.retryDelayMs))
+        await this.wait(this.retryDelayMs)
         continue
       }
 
