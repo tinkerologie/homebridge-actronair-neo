@@ -158,19 +158,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       if (changed.has('*') || [...changed].some(path => path.startsWith('UserAirconSettings.EnabledZones')))
         this.commands?.syncEnabledZones(this.state.get<boolean[]>('UserAirconSettings.EnabledZones') ?? [])
 
-      for (const binding of this.matterBindings.values()) {
-        try {
-          const result = binding.update(changed)
-          if (result && typeof (result as Promise<unknown>).catch === 'function') {
-            (result as Promise<unknown>).catch((error) => {
-              this.log.error(`Failed to update Matter accessory "${binding.accessory.displayName}": ${(error as Error).message}`)
-            })
-          }
-        }
-        catch (error) {
-          this.log.error(`Failed to update Matter accessory "${binding.accessory.displayName}": ${(error as Error).message}`)
-        }
-      }
+      for (const binding of this.matterBindings.values())
+        this.pushMatterState(binding, changed)
     })
 
     this.api.on('didFinishLaunching', () => {
@@ -189,6 +178,23 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.hapBindings.clear()
       this.matterBindings.clear()
     })
+  }
+
+  /** Push changed paths to one Matter binding; a failure is logged, never thrown. */
+  private pushMatterState(binding: MatterBinding | undefined, changed: Set<string>): void {
+    if (!binding)
+      return
+    const fail = (error: unknown): void => {
+      this.log.error(`Failed to update Matter accessory "${binding.accessory.displayName}": ${(error as Error).message}`)
+    }
+    try {
+      const result = binding.update(changed)
+      if (result && typeof (result as Promise<unknown>).catch === 'function')
+        (result as Promise<unknown>).catch(fail)
+    }
+    catch (error) {
+      fail(error)
+    }
   }
 
   /** Test seam — lets tests supply a stub REST client. */
@@ -464,6 +470,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     const wanted = new Set<string>()
     const toRegister: MatterAccessory[] = []
     const toUpdate: MatterAccessory[] = []
+    const restored: string[] = []
 
     for (const device of discovered) {
       // Reserve the identity first so a build failure never unregisters a cached accessory.
@@ -490,8 +497,10 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         toUpdate.push(existing)
       }
       else {
-        if (existing)
+        if (existing) {
           this.log.info(`Restoring Matter accessory from cache: ${accessory.displayName}`)
+          restored.push(accessory.UUID)
+        }
         toRegister.push(accessory)
       }
     }
@@ -506,6 +515,11 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
           this.matterAccessories.set(acc.UUID, acc)
           this.matterRegistered.add(acc.UUID)
         }
+        // A restored endpoint keeps its cached (pre-restart) cluster values; `clusters` only
+        // seeds a brand-new accessory. Push the live state now, because NeoState already holds
+        // it, so later polls see no diff and would otherwise never correct the stale values.
+        for (const uuid of restored)
+          this.pushMatterState(this.matterBindings.get(uuid), new Set(['*']))
       }
       catch (error) {
         for (const acc of toRegister)

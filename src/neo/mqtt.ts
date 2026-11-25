@@ -34,6 +34,9 @@ export interface NeoMqttOptions {
   onHealthChange?: (healthy: boolean) => void
 }
 
+/** Removes exactly the listeners `wire()` attached to a client, and nothing else. */
+const detachers = new WeakMap<MqttClient, () => void>()
+
 /**
  * MQTT push transport. Overlays the REST poll loop, it never replaces it: every failure
  * here — discovery, TLS, auth, a malformed payload — is caught, logged and backed off,
@@ -380,9 +383,6 @@ export class NeoMqtt {
     this.reconnectTimer = setTimeout(() => void this.attemptConnect(), delay)
   }
 }
-
-/** Removes exactly the listeners `wire()` attached to a client, and nothing else. */
-const detachers = new WeakMap<MqttClient, () => void>()
 
 /**
  * Tear a client down for good, in two parts:

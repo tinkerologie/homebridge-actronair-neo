@@ -1288,6 +1288,11 @@ describe('actronAirNeoPlatform', () => {
       expect(registered.map(a => a.UUID)).toContain('matter-uuid-matter:neo000000')
       expect(api.matter.updatePlatformAccessories).not.toHaveBeenCalled()
 
+      // Homebridge keeps a restored endpoint's cached cluster values (api.d.ts: "To set the
+      // current state of a restored accessory, call updateAccessoryState() once this promise
+      // resolves"), so the binding must push the live state right after re-registration.
+      expect(api.matter.updateAccessoryState.mock.calls.some((call: unknown[]) => call[0] === 'matter-uuid-matter:neo000000')).toBe(true)
+
       // A later rediscovery in the same session updates rather than re-registers.
       api.matter.registerPlatformAccessories.mockClear()
       await p.discoverDevices()
