@@ -722,6 +722,52 @@ describe('neoMqtt', () => {
     expect(client.listenerCount('connect')).toBe(0)
   })
 
+  it('stop() during the synchronous connect call discards the brand-new client', async () => {
+    const clients: FakeClient[] = []
+    let mqtt!: NeoMqtt
+    const impl = vi.fn(() => {
+      const client = new FakeClient()
+      clients.push(client)
+      mqtt.stop() // shutdown lands while the socket is being created
+      return client
+    })
+    mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    expect(clients[0].ended).toBe(true)
+    expect(clients[0].listenerCount('message')).toBe(0)
+  })
+
+  it('a superseded client failing late is cleaned up without touching the current one', async () => {
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+    await mqtt.start()
+    // The first client errors (handled), then a reconnect creates a second one.
+    clients[0].emit('error', Object.assign(new Error('ECONNREFUSED'), { code: 'ECONNREFUSED' }))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(clients).toHaveLength(2)
+    const old = clients[0]
+    // Re-attach a listener the way a stale closure still holds it, then fire it late.
+    clients[1].emit('connect')
+    old.emit('close')
+    expect(clients[1].ended).toBe(false)
+    expect(mqtt.healthy).toBe(true)
+    mqtt.stop()
+  })
+
   it('resets the backoff on stop(), so a stop/start cycle does not inherit a stale 60s wait', async () => {
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()

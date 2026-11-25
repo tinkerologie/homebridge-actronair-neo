@@ -301,6 +301,92 @@ describe('actronAirNeoPlatform', () => {
     expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/Failed to initialize accessory/))
   })
 
+  it('reports an account with no systems at all, keeping accessories', async () => {
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+    p.injectForTest({
+      getSystems: async () => ({
+        _embedded: { 'ac-system': [] },
+      }),
+      getStatus: vi.fn(),
+    } as never)
+    await p.discoverDevices()
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/No ActronAir systems found/))
+    expect(api.unregisterPlatformAccessories).not.toHaveBeenCalled()
+  })
+
+  it('surfaces the no-status explanation when every system on the account is dead', async () => {
+    const { NeoNoStatusError } = await import('../src/neo/rest.js')
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+    p.injectForTest({
+      getSystems: async () => ({
+        _embedded: {
+          'ac-system': [
+            { serial: 'dead01' },
+            { serial: 'dead02' },
+          ],
+        },
+      }),
+      getStatus: vi.fn(async (serial: string) => {
+        throw new NeoNoStatusError(serial)
+      }),
+    } as never)
+    await p.discoverDevices()
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/dead02 has no reported status/))
+    expect(api.registerPlatformAccessories).not.toHaveBeenCalled()
+  })
+
+  it('stops scanning systems when shutdown arrives mid-scan', async () => {
+    const { NeoNoStatusError } = await import('../src/neo/rest.js')
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+    const getStatus = vi.fn(async (serial: string) => {
+      api.handlers.shutdown()
+      throw new NeoNoStatusError(serial)
+    })
+    p.injectForTest({
+      getSystems: async () => ({
+        _embedded: {
+          'ac-system': [
+            { serial: 'dead01' },
+            { serial: 'live02' },
+          ],
+        },
+      }),
+      getStatus,
+      close: vi.fn(),
+    } as never)
+    await p.discoverDevices()
+    expect(getStatus).toHaveBeenCalledTimes(1)
+    expect(p.serial).toBe('')
+  })
+
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new Error('sync boom')
+      },
+      /sync boom/,
+    ],
+    [
+      'rejects',
+      () => Promise.reject(new Error('async boom')),
+      /async boom/,
+    ],
+  ])('logs (never throws) when a Matter binding update %s', async (_label, update, message) => {
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x' } as never, api)
+    p.matterBindings.set('u', {
+      uuid: 'u',
+      accessory: { displayName: 'Thermo' },
+      update: vi.fn(update),
+    } as never)
+    expect(() => p.state.replace(restStatus.lastKnownState)).not.toThrow()
+    await vi.waitFor(() => expect(log.error).toHaveBeenCalledWith(expect.stringMatching(message)))
+  })
+
   it('does not start when no account is linked', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x' } as never, api)
