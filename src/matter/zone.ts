@@ -5,7 +5,7 @@ import type { MatterBinding } from './types.js'
 import { getUsableZoneHumidity, getUsableZoneTemp, resolveSetpointBounds, resolveZoneVariance } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, NeoCommand } from '../neo/types.js'
-import { clampSetpoint, thermostatLimits, toCelsius } from './thermostat.js'
+import { clampSetpoint, limitTransitions, thermostatLimits, toCelsius } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -131,7 +131,14 @@ export function buildZoneMatterAccessory(
   const initialCool = clampSetpoint(platform.state.get<number>(paths.coolSetpoint) ?? 24, limits.cool)
   // Clusters and parts are fixed at registration: update() may only target those added here.
   const batteryState = getBatteryState()
+  // A restored endpoint is reused as cached whenever device type, parts and features match
+  // (Homebridge's AccessoryManager), so a powerSource cluster the cache lacks would never be
+  // created and every battery update would fail. Follow the cache: a sensor that joins later
+  // gets no battery reading rather than an error on every update. Re-registering to add the
+  // cluster would cost the user the accessory's room and automations in their Matter apps.
+  const cached = platform.matterAccessories?.get(uuid)
   const hasPowerSource = batteryState !== undefined
+    && (cached === undefined || cached.clusters?.powerSource !== undefined)
   let hasTemperaturePart = false
   let hasHumidityPart = false
 
@@ -150,7 +157,7 @@ export function buildZoneMatterAccessory(
       },
     }
 
-    if (batteryState) {
+    if (hasPowerSource && batteryState) {
       clusters.powerSource = batteryState
     }
 
@@ -231,7 +238,7 @@ export function buildZoneMatterAccessory(
       },
     }
 
-    if (batteryState) {
+    if (hasPowerSource && batteryState) {
       clusters.powerSource = batteryState
     }
 
@@ -306,6 +313,15 @@ export function buildZoneMatterAccessory(
   const binding: MatterBinding = {
     uuid,
     accessory,
+    // Only the thermostat form of a zone has limits; the switch form has nothing to reconcile.
+    ...(platform.cfg.zonesAsHeaterCoolers
+      ? {
+          reconcileLimits: async (previous: Record<string, unknown> | undefined) => {
+            for (const write of limitTransitions(previous, limits.attributes))
+              await platform.api.matter?.updateAccessoryState(uuid, 'thermostat', write)
+          },
+        }
+      : {}),
     update: (changed: Set<string>) => {
       const all = changed.has('*')
       const prefix = `RemoteZoneInfo[${zi}]`

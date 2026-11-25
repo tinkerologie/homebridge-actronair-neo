@@ -733,6 +733,50 @@ describe('matter layer', () => {
         expect(calls.filter(call => call[1] === 'powerSource')).toEqual([])
     })
 
+    it('a restored zone keeps the clusters its cached endpoint has: no powerSource the cache never had', () => {
+      // Homebridge reuses a restored endpoint whenever device type, parts and features match; a
+      // powerSource cluster added since is never created, so every battery update would fail.
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
+      const uuid = `matter-uuid-matter:zone-${zoneIndex}`
+      ;(platform as unknown as { matterAccessories: Map<string, unknown> }).matterAccessories = new Map([
+        [
+          uuid,
+          {
+            UUID: uuid,
+            displayName: 'Cached',
+            clusters: { thermostat: {} },
+          },
+        ],
+      ])
+      const { accessory, binding } = buildZoneMatterAccessory(platform, zone(zoneIndex))
+      expect(accessory.clusters!.powerSource).toBeUndefined()
+      matterApi.updateAccessoryState.mockClear()
+      binding.update(new Set(['*']))
+      expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource')).toEqual([])
+    })
+
+    it('a restored zone whose cache has a powerSource cluster keeps reporting its battery', () => {
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
+      const uuid = `matter-uuid-matter:zone-${zoneIndex}`
+      ;(platform as unknown as { matterAccessories: Map<string, unknown> }).matterAccessories = new Map([
+        [
+          uuid,
+          {
+            UUID: uuid,
+            displayName: 'Cached',
+            clusters: { thermostat: {}, powerSource: {} },
+          },
+        ],
+      ])
+      const { accessory, binding } = buildZoneMatterAccessory(platform, zone(zoneIndex))
+      expect(accessory.clusters!.powerSource).toBeDefined()
+      matterApi.updateAccessoryState.mockClear()
+      binding.update(new Set(['*']))
+      expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource').length).toBe(1)
+    })
+
     it('does not update a zone powerSource cluster registered without a battery', () => {
       const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
       const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
