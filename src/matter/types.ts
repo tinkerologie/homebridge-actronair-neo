@@ -1,5 +1,6 @@
 import type { MatterAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { CachedThermostatAttributes } from './thermostat.js'
 import { CommandResult } from '../neo/types.js'
 
 export interface MatterBinding {
@@ -13,7 +14,7 @@ export interface MatterBinding {
    * endpoint, so without this a setpoint inside the new limits but outside the stale ones is
    * rejected on every update. See limitTransitions() in thermostat.ts.
    */
-  reconcileLimits?: (previous: Record<string, unknown> | undefined) => Promise<void>
+  reconcileLimits?: (previous: CachedThermostatAttributes | undefined) => Promise<void>
 }
 
 export const MATTER_STRING_MAX = 32

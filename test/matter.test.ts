@@ -5,6 +5,7 @@ import { buildMatterAccessory } from '../src/matter/mapping.js'
 import { buildMasterMatterAccessory } from '../src/matter/master.js'
 import { buildOutdoorTempMatterAccessory } from '../src/matter/sensors.js'
 import { buildSwitchMatterAccessory } from '../src/matter/switches.js'
+import { limitTransitions } from '../src/matter/thermostat.js'
 import { buildAfterHoursMatterAccessory } from '../src/matter/valve.js'
 import { buildZoneMatterAccessory } from '../src/matter/zone.js'
 import { NeoState } from '../src/neo/state.js'
@@ -797,5 +798,133 @@ describe('matter layer', () => {
       binding.update(new Set(['*']))
       expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource')).toEqual([])
     })
+  })
+})
+
+describe('limitTransitions (Matter thermostat limit moves matter.js accepts)', () => {
+  // The device's 16-30 range for both modes, in 0.01 C: heat abs 700-3000, cool abs 1600-3200.
+  const next = {
+    absMinHeatSetpointLimit: 700,
+    absMaxHeatSetpointLimit: 3000,
+    minHeatSetpointLimit: 1600,
+    maxHeatSetpointLimit: 3000,
+    absMinCoolSetpointLimit: 1600,
+    absMaxCoolSetpointLimit: 3200,
+    minCoolSetpointLimit: 1600,
+    maxCoolSetpointLimit: 3000,
+  }
+
+  it('writes nothing when the endpoint already holds these limits', () => {
+    expect(limitTransitions({ ...next }, next)).toEqual([])
+  })
+
+  it('widening (1.3.2 cache: heat capped at 26, cool floored at 20): abs first, then user limits', () => {
+    const cached = {
+      absMinHeatSetpointLimit: 700,
+      absMaxHeatSetpointLimit: 2600,
+      minHeatSetpointLimit: 1000,
+      maxHeatSetpointLimit: 2600,
+      absMinCoolSetpointLimit: 2000,
+      absMaxCoolSetpointLimit: 3200,
+      minCoolSetpointLimit: 2000,
+      maxCoolSetpointLimit: 3200,
+    }
+    expect(limitTransitions(cached, next)).toEqual([
+      {
+        absMinHeatSetpointLimit: 700,
+        absMaxHeatSetpointLimit: 3000,
+        absMinCoolSetpointLimit: 1600,
+        absMaxCoolSetpointLimit: 3200,
+      },
+      {
+        minHeatSetpointLimit: 1600,
+        maxHeatSetpointLimit: 3000,
+        minCoolSetpointLimit: 1600,
+        maxCoolSetpointLimit: 3000,
+      },
+    ])
+  })
+
+  it('narrowing: abs widened to cover the old user limits, user limits written, then abs tightened', () => {
+    const cached = {
+      absMinHeatSetpointLimit: 500,
+      absMaxHeatSetpointLimit: 3500,
+      minHeatSetpointLimit: 600,
+      maxHeatSetpointLimit: 3400,
+      absMinCoolSetpointLimit: 1000,
+      absMaxCoolSetpointLimit: 3500,
+      minCoolSetpointLimit: 1000,
+      maxCoolSetpointLimit: 3500,
+    }
+    expect(limitTransitions(cached, next)).toEqual([
+      {
+        absMinHeatSetpointLimit: 500,
+        absMaxHeatSetpointLimit: 3500,
+        absMinCoolSetpointLimit: 1000,
+        absMaxCoolSetpointLimit: 3500,
+      },
+      {
+        minHeatSetpointLimit: 1600,
+        maxHeatSetpointLimit: 3000,
+        minCoolSetpointLimit: 1600,
+        maxCoolSetpointLimit: 3000,
+      },
+      {
+        absMinHeatSetpointLimit: 700,
+        absMaxHeatSetpointLimit: 3000,
+        absMinCoolSetpointLimit: 1600,
+        absMaxCoolSetpointLimit: 3200,
+      },
+    ])
+  })
+
+  it('nothing cached: writes the new limits (abs first), never a third step', () => {
+    expect(limitTransitions(undefined, next)).toEqual([
+      {
+        absMinHeatSetpointLimit: 700,
+        absMaxHeatSetpointLimit: 3000,
+        absMinCoolSetpointLimit: 1600,
+        absMaxCoolSetpointLimit: 3200,
+      },
+      {
+        minHeatSetpointLimit: 1600,
+        maxHeatSetpointLimit: 3000,
+        minCoolSetpointLimit: 1600,
+        maxCoolSetpointLimit: 3000,
+      },
+    ])
+  })
+
+  it('a zone thermostat reconciles its endpoint limits through the same transitions', async () => {
+    const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+    const { binding } = buildZoneMatterAccessory(platform, {
+      id: 'zone-0',
+      displayName: 'Zone',
+      kind: 'zone',
+      zoneIndex: 0,
+    })
+    matterApi.updateAccessoryState.mockClear()
+    await binding.reconcileLimits!({ minHeatSetpointLimit: 1000, maxHeatSetpointLimit: 2600 })
+    const writes = matterApi.updateAccessoryState.mock.calls.map(call => [
+      call[0],
+      call[1],
+      Object.keys(call[2] as object),
+    ])
+    expect(writes.length).toBeGreaterThanOrEqual(2)
+    expect(writes.every(w => w[0] === 'matter-uuid-matter:zone-0' && w[1] === 'thermostat')).toBe(true)
+    // Abs limits always land before user limits.
+    expect((writes[0][2] as string[]).every(k => k.startsWith('abs'))).toBe(true)
+    expect((writes[1][2] as string[]).every(k => !k.startsWith('abs'))).toBe(true)
+  })
+
+  it('a switch-mode zone has no thermostat, so nothing to reconcile', () => {
+    const { platform } = makePlatform({ zonesAsHeaterCoolers: false })
+    const { binding } = buildZoneMatterAccessory(platform, {
+      id: 'zone-0',
+      displayName: 'Zone',
+      kind: 'zone',
+      zoneIndex: 0,
+    })
+    expect(binding.reconcileLimits).toBeUndefined()
   })
 })

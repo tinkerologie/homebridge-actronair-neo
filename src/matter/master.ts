@@ -3,7 +3,7 @@ import type { ActronAirNeoPlatform, Discovered } from '../platform.js'
 import type { MatterBinding } from './types.js'
 import { getUsableMasterHumidity, getUsableMasterTemp, resolveSetpointBounds } from '../neo/capabilities.js'
 import { ClimateMode, FanMode, NeoCommand } from '../neo/types.js'
-import { clampSetpoint, limitTransitions, thermostatLimits } from './thermostat.js'
+import { clampSetpoint, reconcileThermostatLimits, thermostatLimits } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -290,11 +290,11 @@ export function buildMasterMatterAccessory(
   const binding: MatterBinding = {
     uuid,
     accessory,
-    reconcileLimits: async (previous) => {
-      // Sequential on purpose: each write is checked against the state the last one left.
-      for (const write of limitTransitions(previous, limits.attributes))
-        await platform.api.matter?.updateAccessoryState(uuid, 'thermostat', write)
-    },
+    reconcileLimits: previous => reconcileThermostatLimits(
+      attributes => platform.api.matter?.updateAccessoryState(uuid, 'thermostat', attributes),
+      previous,
+      limits.attributes,
+    ),
     update: (changed: Set<string>) => {
       const all = changed.has('*')
       const thermostatUpdate: Record<string, unknown> = {}

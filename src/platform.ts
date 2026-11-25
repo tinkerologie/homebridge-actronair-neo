@@ -10,6 +10,7 @@ import type {
 } from 'homebridge'
 import type { DisposableAccessory } from './accessories/disposable.js'
 import type { NeoConfig } from './config.js'
+import type { CachedThermostatAttributes } from './matter/thermostat.js'
 import type { MatterBinding } from './matter/types.js'
 import type { NeoCapabilities } from './neo/capabilities.js'
 import { AfterHoursAccessory } from './accessories/afterHours.js'
@@ -187,7 +188,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
    * date: limits first, in writes matter.js accepts, then the full live state. Logged, never
    * thrown, so one accessory cannot stop the others.
    */
-  private async refreshRestoredMatter(uuid: string, previousThermostat: Record<string, unknown> | undefined): Promise<void> {
+  private async refreshRestoredMatter(uuid: string, previousThermostat: CachedThermostatAttributes | undefined): Promise<void> {
     const binding = this.matterBindings.get(uuid)
     if (!binding)
       return
@@ -492,7 +493,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     const toUpdate: MatterAccessory[] = []
     const restored: string[] = []
     /** Limit attributes each endpoint currently holds, captured before they are overwritten. */
-    const previousThermostat = new Map<string, Record<string, unknown> | undefined>()
+    const previousThermostat = new Map<string, CachedThermostatAttributes | undefined>()
 
     for (const device of discovered) {
       // Reserve the identity first so a build failure never unregisters a cached accessory.
@@ -511,7 +512,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
 
       const existing = this.matterAccessories.get(accessory.UUID)
       if (existing)
-        previousThermostat.set(accessory.UUID, existing.clusters?.thermostat as Record<string, unknown> | undefined)
+        previousThermostat.set(accessory.UUID, existing.clusters?.thermostat as CachedThermostatAttributes | undefined)
       if (existing && this.matterRegistered.has(accessory.UUID)) {
         existing.displayName = accessory.displayName
         existing.deviceType = accessory.deviceType

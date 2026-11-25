@@ -1,11 +1,12 @@
 import type { MatterAccessory } from 'homebridge'
 import type { UserSetpointLimits } from '../neo/capabilities.js'
 import type { ActronAirNeoPlatform, Discovered } from '../platform.js'
+import type { CachedThermostatAttributes } from './thermostat.js'
 import type { MatterBinding } from './types.js'
 import { getUsableZoneHumidity, getUsableZoneTemp, resolveSetpointBounds, resolveZoneVariance } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, NeoCommand } from '../neo/types.js'
-import { clampSetpoint, limitTransitions, thermostatLimits, toCelsius } from './thermostat.js'
+import { clampSetpoint, reconcileThermostatLimits, thermostatLimits, toCelsius } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -316,10 +317,11 @@ export function buildZoneMatterAccessory(
     // Only the thermostat form of a zone has limits; the switch form has nothing to reconcile.
     ...(platform.cfg.zonesAsHeaterCoolers
       ? {
-          reconcileLimits: async (previous: Record<string, unknown> | undefined) => {
-            for (const write of limitTransitions(previous, limits.attributes))
-              await platform.api.matter?.updateAccessoryState(uuid, 'thermostat', write)
-          },
+          reconcileLimits: (previous: CachedThermostatAttributes | undefined) => reconcileThermostatLimits(
+            attributes => platform.api.matter?.updateAccessoryState(uuid, 'thermostat', attributes),
+            previous,
+            limits.attributes,
+          ),
         }
       : {}),
     update: (changed: Set<string>) => {
