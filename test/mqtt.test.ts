@@ -202,6 +202,7 @@ describe('neoMqtt', () => {
   describe('state refresh on (re)connect', () => {
     function setup() {
       const state = new NeoState()
+      state.setCloudConnected(true) // as discovery leaves it before push starts
       const rest = buildRest()
       const { impl, clients } = makeConnectImpl()
       const mqtt = new NeoMqtt({
@@ -262,6 +263,20 @@ describe('neoMqtt', () => {
       clients[0].emit('connect')
       await vi.advanceTimersByTimeAsync(0)
       expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      mqtt.stop()
+    })
+
+    it('resyncs via REST at once when reconnecting after an outage, so commands are not refused as offline', async () => {
+      // A failed poll during the outage cleared cloudConnected. getAll's full status does not
+      // restore it, and healthy push widens polling to 5 minutes, so without an immediate REST
+      // resync every HomeKit write would be refused as "offline" for that long.
+      const { state, rest, clients, mqtt } = setup()
+      state.setCloudConnected(false)
+      await mqtt.start()
+      clients[0].emit('connect')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(rest.getStatus).toHaveBeenCalledTimes(1)
+      expect(state.cloudConnected).toBe(true)
       mqtt.stop()
     })
 

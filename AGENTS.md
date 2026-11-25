@@ -210,7 +210,11 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    On every connect it publishes `getAll` to `.../app/cmd`, as the Neo app does, and the
    full-status answer refreshes state. A REST resync stays the guarantee: it runs at once if
    the publish fails, or after 15s if no full status arrived. Don't drop the fallback, or a
-   change missed while disconnected could persist until the 5-minute safety-net poll.
+   change missed while disconnected could persist until the 5-minute safety-net poll. The
+   exception: when reconnecting while `cloudConnected` is false (a poll failed during the
+   outage), it resyncs from REST straight away instead of sending `getAll`. Only a REST
+   status's `isOnline` restores that flag, and healthy push widens polling to 5 minutes, so
+   waiting on `getAll` would leave every write refused as "offline" for that long.
    Client id is a **fresh random id with `clean: true` on every connect**, not a persisted
    stable one — matching the repo owner's own working Home Assistant integration against this
    same broker, which commented that there's no session worth resuming and a persistent

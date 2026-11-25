@@ -137,9 +137,9 @@ export class NeoAuth {
 
     const token = TokenSchema.parse(json)
     if (token.refresh_token && token.refresh_token !== this.refreshToken) {
-      // config.json still holds the old token, and this plugin never rewrites config.json
-      // itself. Opening the settings page saves the new one (see homebridge-ui/server.js).
-      this.opts.log.warn('ActronAir issued a new account token. Open the plugin settings once so it is saved; otherwise you may need to re-link after a restart.')
+      // Not persisted: config.json keeps the old token and the settings page reads it from
+      // there, so say plainly what the user will need to do rather than promise a save.
+      this.opts.log.warn('ActronAir issued a new account token. It is used until Homebridge restarts; if the plugin cannot connect after a restart, re-link your account in the plugin settings.')
       this.refreshToken = token.refresh_token
     }
     this.accessToken = token.access_token

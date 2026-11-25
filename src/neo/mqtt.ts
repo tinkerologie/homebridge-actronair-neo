@@ -244,6 +244,14 @@ export class NeoMqtt {
       // against the ~20/min rate limit. REST stays the guarantee: if the publish fails, or no
       // full status arrives in time, resync from REST as before.
       clearTimeout(this.getAllFallbackTimer)
+      // Reconnecting after an outage: a failed poll cleared cloudConnected, and only a REST
+      // status (its isOnline) restores it. A full-status push does not, and healthy push widens
+      // polling to 5 minutes, so waiting on getAll would leave every write refused as "offline"
+      // for that long. REST answers both questions at once.
+      if (!this.opts.state.cloudConnected) {
+        void this.resyncFromRest()
+        return
+      }
       this.getAllFallbackTimer = setTimeout(() => {
         this.opts.log.debug('No full status after getAll, resyncing via REST')
         void this.resyncFromRest()

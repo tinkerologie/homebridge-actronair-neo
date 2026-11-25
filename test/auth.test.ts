@@ -48,7 +48,7 @@ describe('neoAuth', () => {
     expect(new URLSearchParams(bodies[1]).get('refresh_token')).toBe('refresh-2')
     const log = (auth as unknown as { opts: { log: { warn: ReturnType<typeof vi.fn> } } }).opts.log
     expect(log.warn).toHaveBeenCalledTimes(1)
-    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/plugin settings/i))
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/re-link your account in the plugin settings/i))
   })
 
   it('requests a device code', async () => {

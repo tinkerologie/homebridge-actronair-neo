@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HomeKit zone tiles no longer offer a heat/cool/auto picker that did nothing: a zone follows the main unit's mode, so the mode is now shown read-only and limited to the modes the unit supports. Zone temperature thresholds never report an out-of-range value.
 - Mode switches report on/off as true/false, and the mode switches and After Hours valve have their own serial numbers.
 - On shutdown, a pending cloud request or rate-limit wait (up to 60 seconds) is cancelled instead of delaying Homebridge's exit.
-- If the ActronAir cloud ever issues a new account token, the plugin uses it straight away and the settings page saves it.
+- If the ActronAir cloud ever issues a new account token, the plugin uses it until Homebridge restarts and says so in the log. A new token the settings page receives is saved to the configuration.
 - Account linking in the settings page no longer trusts the ActronAir cloud's device-code response unchecked. The verification link must be `https`. A missing or too-small polling interval falls back to the RFC 8628 default of 5 seconds instead of polling the cloud in a tight loop. A response missing its code or expiry is reported as an error instead of silently "timing out".
 
 ### Security
