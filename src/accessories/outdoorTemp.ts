@@ -1,7 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
 import type { DisposableAccessory } from './disposable.js'
-import { HAPStatus } from 'homebridge'
 import { getUsableOutdoorTemp } from '../neo/capabilities.js'
 
 /** Paths this accessory's characteristic depends on. */
@@ -88,6 +87,6 @@ export class OutdoorTempAccessory implements DisposableAccessory {
 
     // Never had a valid reading — there is no honest value to report, fabricating one
     // (e.g. 0°C) would be worse than surfacing the failure.
-    throw new this.platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+    throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
   }
 }

@@ -1,5 +1,6 @@
 import type { StatusTree } from '../src/neo/schemas.js'
 import { readFileSync } from 'node:fs'
+import { HAPStatus } from 'homebridge'
 import { describe, expect, it, vi } from 'vitest'
 import { AfterHoursAccessory } from '../src/accessories/afterHours.js'
 import { StatusResponseSchema } from '../src/neo/schemas.js'
@@ -115,7 +116,7 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
       SetDuration: 'SetDuration',
     },
     api: {
-      hap: { HapStatusError: class HapStatusError extends Error {} },
+      hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {} },
     },
   } as never
 }

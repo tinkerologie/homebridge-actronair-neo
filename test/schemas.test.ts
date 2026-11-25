@@ -65,6 +65,22 @@ describe('neo schemas', () => {
     expect(parsed._embedded['ac-system'][0].serial).toBe('neo000000')
   })
 
+  it('accepts identifier fields the cloud sends as numbers, as strings (upstream ActronAirAPI 6411d4c)', () => {
+    const status = fixture('rest-status')
+    const sys = status.lastKnownState.AirconSystem
+    sys.MasterWCModel = 1000
+    sys.IndoorUnit.NV_ModelNumber = 561
+    sys.OutdoorUnit.Family = 7
+    sys.Peripherals[0].SerialNumber = 123456
+    status.wcFirmware = 2
+    const parsed = StatusResponseSchema.parse(status)
+    const out = parsed.lastKnownState.AirconSystem!
+    expect(out.MasterWCModel).toBe('1000')
+    expect(out.IndoorUnit!.NV_ModelNumber).toBe('561')
+    expect(out.OutdoorUnit!.Family).toBe('7')
+    expect(out.Peripherals![0].SerialNumber).toBe('123456')
+  })
+
   it('tolerates unknown extra fields', () => {
     const raw = fixture('connection-details')
     raw.SomeNewFieldActronAdded = 'whatever'

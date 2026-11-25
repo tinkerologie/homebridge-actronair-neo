@@ -33,12 +33,21 @@ function clientIdOrDefault(clientId) {
     : requireString(clientId, 'clientId')
 }
 
-/** Only an https URL may become the browser's clickable verification link. */
+/** The verification page the cloud has been seen to return lives on this domain. */
+const VERIFICATION_DOMAIN = 'actronair.com.au'
+
+/**
+ * Only an https URL on the ActronAir domain may become the browser's clickable link. The user
+ * types their account credentials into whatever page this opens, so a link elsewhere (a
+ * tampered or misconfigured response) must never be offered.
+ */
 function httpsUrlOrUndefined(value) {
   if (typeof value !== 'string')
     return undefined
   try {
-    return new URL(value).protocol === 'https:'
+    const url = new URL(value)
+    const onDomain = url.hostname === VERIFICATION_DOMAIN || url.hostname.endsWith(`.${VERIFICATION_DOMAIN}`)
+    return url.protocol === 'https:' && onDomain
       ? value
       : undefined
   }
@@ -113,8 +122,13 @@ class UiServer extends HomebridgePluginUiServer {
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       device_code: requireString(deviceCode, 'deviceCode'),
     })
-    if (status === 200)
+    if (status === 200) {
+      // The refresh token is the only thing linking saves; a 200 without one must not be
+      // reported as "Account linked" with nothing written to the config.
+      if (typeof json.refresh_token !== 'string' || !json.refresh_token)
+        return { state: 'failed', error: 'The ActronAir cloud did not return a refresh token' }
       return { state: 'authorised', refreshToken: json.refresh_token, accessToken: json.access_token }
+    }
     if (json.error === 'authorization_pending' || json.error === 'slow_down')
       return { state: 'pending', slowDown: json.error === 'slow_down' }
     return { state: 'failed', error: json.error ?? `HTTP ${status}` }

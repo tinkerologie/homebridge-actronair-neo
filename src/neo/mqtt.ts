@@ -215,7 +215,7 @@ export class NeoMqtt {
       this.scheduleReconnect()
     }
 
-    client.on('connect', () => {
+    const onConnect = (): void => {
       this.connected = true
       this.backoffMs = MIN_BACKOFF_MS
       this.touchHeartbeat()
@@ -227,18 +227,18 @@ export class NeoMqtt {
       // Always resync on (re)connect: any state change missed while disconnected must not
       // silently persist.
       void this.resyncFromRest()
-    })
+    }
 
-    client.on('message', (topic, payload) => {
+    const onMessage = (topic: string, payload: Buffer): void => {
       try {
         this.handleMessage(topic, payload, base)
       }
       catch (error) {
         this.opts.log.debug(`MQTT message handling failed: ${(error as Error).message}`)
       }
-    })
+    }
 
-    client.on('error', (error: Error & { code?: number }) => {
+    const onError = (error: Error & { code?: number }): void => {
       // A numeric `code` here is an MQTT CONNACK reason code (see mqtt.js's ReasonCodes) —
       // "Not authorized" / "Bad username or password" / etc — not a plain socket errno. The
       // access token IS the MQTT password and does expire, so this is routine and expected
@@ -253,9 +253,20 @@ export class NeoMqtt {
         this.opts.log.debug(`MQTT error: ${error.message}`)
       }
       handleFailure()
-    })
+    }
 
-    client.on('close', () => handleFailure())
+    const onClose = (): void => handleFailure()
+
+    client.on('connect', onConnect)
+    client.on('message', onMessage)
+    client.on('error', onError)
+    client.on('close', onClose)
+    detachers.set(client, () => {
+      client.off('connect', onConnect)
+      client.off('message', onMessage)
+      client.off('error', onError)
+      client.off('close', onClose)
+    })
   }
 
   private handleMessage(topic: string, payload: Buffer, base: string): void {
@@ -266,10 +277,14 @@ export class NeoMqtt {
 
     let json: unknown
     try {
-      json = JSON.parse(payload.toString())
+      json = parseCloudJson(payload.toString())
     }
     catch {
-      this.opts.log.debug(`MQTT payload on ${topic} was not valid JSON`)
+      // Heartbeats keep push "healthy" (and polling at its slow safety-net cadence) even while
+      // every state payload is being dropped, so an unreadable one must trigger a resync rather
+      // than be ignored, or HomeKit could sit on stale state for up to five minutes.
+      this.opts.log.debug(`MQTT payload on ${topic} was not valid JSON, resyncing via REST`)
+      void this.resyncFromRest()
       return
     }
 
@@ -366,15 +381,49 @@ export class NeoMqtt {
   }
 }
 
+/** Removes exactly the listeners `wire()` attached to a client, and nothing else. */
+const detachers = new WeakMap<MqttClient, () => void>()
+
 /**
- * Tear a client down for good. `removeAllListeners()` alone is unsafe: mqtt.js's internal
- * `streamErrorHandler` re-emits any coded socket error (ECONNRESET, EPIPE, ...) as a client
- * `'error'`, and that can still fire during or after `end(true)` destroys the stream. An
- * `'error'` event with no listener is thrown by Node as an uncaught exception, which takes the
- * whole child bridge down. A no-op sink keeps a dying socket's last words harmless.
+ * Tear a client down for good, in two parts:
+ *
+ * - Detach only *our* listeners. `removeAllListeners()` would also strip mqtt.js's own, and
+ *   its constructor-registered `'close'` handler is the only thing that clears `connackTimer`
+ *   and the keepalive manager on a connection that never got a CONNACK. Stripping it leaks a
+ *   30s timer per failed attempt and can hold the process open at shutdown.
+ * - Keep a no-op `'error'` sink. mqtt.js's `streamErrorHandler` re-emits any coded socket error
+ *   (ECONNRESET, EPIPE, ...) as a client `'error'`, which can still fire during or after
+ *   `end(true)`. Node throws an `'error'` event with no listener as an uncaught exception,
+ *   which takes the whole child bridge down.
  */
 function discardClient(client: MqttClient): void {
-  client.removeAllListeners()
+  detachers.get(client)?.()
+  detachers.delete(client)
   client.on('error', () => {})
   client.end(true)
+}
+
+/** A valid JSON escape (stepped over intact) or the cloud's invalid `\'`. */
+const ESCAPE_SEQUENCE = /\\(?:u[0-9a-fA-F]{4}|["\\/bfnrtu])|\\'/g
+
+/**
+ * `JSON.parse`, retrying once with the cloud's invalid apostrophe escapes repaired. The broker
+ * escapes `'` as `\'` (addslashes-style), which JSON forbids, so a zone named "Kurt's Office"
+ * makes every payload mentioning it unparseable. Valid escapes are matched only so they are
+ * stepped over intact (an escaped backslash followed by an apostrophe stays as it is). A
+ * well-formed payload is parsed strictly and never rewritten. Mirrors upstream ActronAirAPI's
+ * `loads_repairing_escapes` (78e12ff).
+ */
+export function parseCloudJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  }
+  catch (error) {
+    const repaired = text.replace(ESCAPE_SEQUENCE, match => match === '\\\''
+      ? '\''
+      : match)
+    if (repaired === text)
+      throw error
+    return JSON.parse(repaired)
+  }
 }

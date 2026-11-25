@@ -1,5 +1,6 @@
 import type { CharacteristicValue } from 'homebridge'
 import { readFileSync } from 'node:fs'
+import { HAPStatus } from 'homebridge'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ZoneAccessory } from '../src/accessories/zone.js'
 import { StatusResponseSchema } from '../src/neo/schemas.js'
@@ -188,7 +189,7 @@ function makePlatform(opts: MakePlatformOpts = {}) {
       ...opts,
     },
     api: {
-      hap: { HapStatusError: FakeHapStatusError },
+      hap: { HAPStatus, HapStatusError: FakeHapStatusError },
     },
   } as never
 

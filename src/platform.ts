@@ -23,7 +23,7 @@ import { NeoAuth, NeoAuthRevokedError } from './neo/auth.js'
 import { deriveCapabilities } from './neo/capabilities.js'
 import { CommandQueue } from './neo/commands.js'
 import { NeoMqtt } from './neo/mqtt.js'
-import { NeoRest } from './neo/rest.js'
+import { NeoNoStatusError, NeoRest } from './neo/rest.js'
 import { NeoState } from './neo/state.js'
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js'
 
@@ -86,6 +86,14 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
   public readonly accessories: PlatformAccessory[] = []
   public readonly matterAccessories: Map<string, MatterAccessory> = new Map()
   public readonly matterBindings: Map<string, MatterBinding> = new Map()
+  /**
+   * Matter UUIDs registered with Homebridge in *this* session. Homebridge restores cached
+   * Matter endpoints with stub handlers and attaches the plugin's real ones only through
+   * registerPlatformAccessories(); updatePlatformAccessories() merges metadata and never
+   * re-binds handlers. So a cached accessory must be re-registered once per session, and
+   * only an accessory already registered this session may be updated instead.
+   */
+  private readonly matterRegistered = new Set<string>()
   public readonly isMatterSupported: boolean
   public readonly state = new NeoState()
   public readonly cfg: NeoConfig
@@ -214,16 +222,41 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       if (this.shuttingDown)
         return
       const list = systems._embedded['ac-system']
-      const target = this.cfg.deviceSerial
-        ? list.find(s => s.serial === this.cfg.deviceSerial)
-        : list[0]
-      if (!target)
-        throw new Error(`No system matching serial ${this.cfg.deviceSerial}`)
-      this.serial = target.serial
+      // With a configured serial, that system or nothing. Without one, the first system that
+      // actually reports state: an account can keep a replaced controller linked, whose status
+      // is permanently null, and blindly taking list[0] would then fail discovery forever.
+      const candidates = this.cfg.deviceSerial
+        ? list.filter(s => s.serial === this.cfg.deviceSerial)
+        : list
+      if (!candidates.length) {
+        throw new Error(this.cfg.deviceSerial
+          ? `No system matching serial ${this.cfg.deviceSerial}`
+          : 'No ActronAir systems found on this account')
+      }
 
-      const status = await this.rest.getStatus(this.serial)
+      let found: { serial: string, status: Awaited<ReturnType<NeoRest['getStatus']>> } | undefined
+      let lastNoStatus: NeoNoStatusError | undefined
+      for (const candidate of candidates) {
+        try {
+          found = { serial: candidate.serial, status: await this.rest.getStatus(candidate.serial) }
+          break
+        }
+        catch (error) {
+          if (!(error instanceof NeoNoStatusError) || this.cfg.deviceSerial)
+            throw error
+          this.log.debug(`Skipping system ${candidate.serial}: ${error.message}`)
+          lastNoStatus = error
+        }
+        // Checked per candidate so a shutdown mid-scan stops further requests.
+        if (this.shuttingDown)
+          return
+      }
       if (this.shuttingDown)
         return
+      if (!found)
+        throw lastNoStatus ?? new Error('No ActronAir system reported status')
+      this.serial = found.serial
+      const status = found.status
       this.state.setCloudConnected(status.isOnline)
       this.state.replace(status.lastKnownState)
 
@@ -362,6 +395,11 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       catch (error) {
         // One broken accessory must not stop the others from registering.
         this.log.error(`Failed to initialize accessory "${device.displayName}": ${(error as Error).message}`)
+        // A brand-new accessory has no services yet, so registering it would publish an empty
+        // tile to HomeKit. Skip it; the next discovery retries. A cached one carries on below:
+        // it stays in `wanted`, so it is never pruned, and keeps its cached services.
+        if (!existing)
+          continue
       }
 
       if (existing) {
@@ -443,8 +481,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.matterBindings.set(accessory.UUID, binding)
 
       const existing = this.matterAccessories.get(accessory.UUID)
-      if (existing) {
-        this.log.info(`Restoring Matter accessory from cache: ${accessory.displayName}`)
+      if (existing && this.matterRegistered.has(accessory.UUID)) {
         existing.displayName = accessory.displayName
         existing.deviceType = accessory.deviceType
         existing.clusters = accessory.clusters
@@ -453,6 +490,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         toUpdate.push(existing)
       }
       else {
+        if (existing)
+          this.log.info(`Restoring Matter accessory from cache: ${accessory.displayName}`)
         toRegister.push(accessory)
       }
     }
@@ -465,6 +504,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
           return
         for (const acc of toRegister) {
           this.matterAccessories.set(acc.UUID, acc)
+          this.matterRegistered.add(acc.UUID)
         }
       }
       catch (error) {
@@ -503,6 +543,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         for (const acc of stale) {
           this.matterAccessories.delete(acc.UUID)
           this.matterBindings.delete(acc.UUID)
+          this.matterRegistered.delete(acc.UUID)
         }
       }
       catch (error) {

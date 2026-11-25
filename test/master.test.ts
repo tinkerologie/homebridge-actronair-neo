@@ -220,7 +220,7 @@ function makeHarness(
       error: vi.fn(),
     },
     api: {
-      hap: { HapStatusError: class HapStatusError extends Error {
+      hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {
         constructor(public hapStatus: HAPStatus) { super(`HAP ${hapStatus}`) }
       } },
     },
@@ -397,6 +397,21 @@ describe('masterAccessory', () => {
 
     await master.setFanMode(100)
     expect(commands.run).toHaveBeenLastCalledWith(NeoCommand.FAN_MODE_AUTO)
+  })
+
+  it('keeps Continuous Mode on when the speed slider moves (+CONT is preserved, as the Matter fan does)', async () => {
+    const { state, commands, master } = makeHarness()
+    state.applyDelta({ 'UserAirconSettings.FanMode': 'LOW+CONT' })
+
+    await master.setFanMode(50)
+    expect(commands.run).toHaveBeenLastCalledWith(NeoCommand.FAN_MODE_MEDIUM_CONT)
+
+    await master.setFanMode(80)
+    expect(commands.run).toHaveBeenLastCalledWith(NeoCommand.FAN_MODE_HIGH_CONT)
+
+    state.applyDelta({ 'UserAirconSettings.FanMode': 'HIGH' })
+    await master.setFanMode(20)
+    expect(commands.run).toHaveBeenLastCalledWith(NeoCommand.FAN_MODE_LOW)
   })
 
   it('refuses threshold and mode writes while offline', async () => {

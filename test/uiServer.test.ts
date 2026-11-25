@@ -112,6 +112,16 @@ describe('homebridge-ui server', () => {
       await expect(server.requestDeviceCode('client-1')).rejects.toThrow(/unexpected response/i)
     })
 
+    it.each([
+      'https://evil.example/device',
+      'https://actronair.com.au.evil.example/device',
+      'https://notactronair.com.au/device',
+    ])('rejects a verification URI outside the ActronAir domain (%s)', async (uri) => {
+      stubDeviceCode({ ...DEVICE_CODE, verification_uri: uri, verification_uri_complete: undefined })
+      const { default: server } = await import('../homebridge-ui/server.js')
+      await expect(server.requestDeviceCode('client-1')).rejects.toThrow(/unexpected response/i)
+    })
+
     it('drops a non-https verification_uri_complete but keeps a valid verification_uri', async () => {
       stubDeviceCode({ ...DEVICE_CODE, verification_uri_complete: 'javascript:alert(1)' })
       const { default: server } = await import('../homebridge-ui/server.js')
@@ -208,6 +218,20 @@ describe('homebridge-ui server', () => {
       await server.requestDeviceCode(undefined)
       const body = (fetchImpl.mock.calls[0] as unknown as [string, RequestInit])[1].body as URLSearchParams
       expect(body.get('client_id')).toBe('home_assistant')
+    })
+  })
+
+  describe('token polling', () => {
+    it('treats a 200 without a refresh token as a failure, so linking never "succeeds" with nothing to save', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ access_token: 'a' }), { status: 200 })))
+      const { default: server } = await import('../homebridge-ui/server.js')
+      await expect(server.pollToken({ deviceCode: 'dc' })).resolves.toMatchObject({ state: 'failed' })
+    })
+
+    it('reports authorised with the refresh token on success', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), { status: 200 })))
+      const { default: server } = await import('../homebridge-ui/server.js')
+      await expect(server.pollToken({ deviceCode: 'dc' })).resolves.toMatchObject({ state: 'authorised', refreshToken: 'r' })
     })
   })
 })

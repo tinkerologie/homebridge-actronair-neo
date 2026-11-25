@@ -6,7 +6,7 @@ import {
   AcSystemsSchema,
   CommandResponseSchema,
   ConnectionDetailsSchema,
-  StatusResponseSchema,
+  RawStatusResponseSchema,
 } from './schemas.js'
 
 /** A handled API/transport failure. Callers degrade to cached state rather than crash. */
@@ -14,6 +14,17 @@ export class NeoApiError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'NeoApiError'
+  }
+}
+
+/**
+ * The cloud knows the system but has no state for it (`lastKnownState: null`), as for a
+ * retired controller still linked to the account. Distinct so discovery can skip it.
+ */
+export class NeoNoStatusError extends NeoApiError {
+  constructor(serial: string) {
+    super(`ActronAir system ${serial} has no reported status (it may have been replaced or retired). If your account has more than one system, set the System Serial in the plugin settings.`)
+    this.name = 'NeoNoStatusError'
   }
 }
 
@@ -82,10 +93,14 @@ export class NeoRest {
   }
 
   async getStatus(serial: string) {
-    return this.request(
+    const status = await this.request(
       `api/v0/client/ac-systems/status/latest?serial=${encodeURIComponent(serial)}`,
-      StatusResponseSchema,
+      RawStatusResponseSchema,
     )
+    const { lastKnownState } = status
+    if (lastKnownState === null)
+      throw new NeoNoStatusError(serial)
+    return { ...status, lastKnownState }
   }
 
   async sendCommand(serial: string, command: object) {

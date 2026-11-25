@@ -2,7 +2,6 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { UserSetpointLimits } from '../neo/capabilities.js'
 import type { ActronAirNeoPlatform } from '../platform.js'
 import type { DisposableAccessory } from './disposable.js'
-import { HAPStatus } from 'homebridge'
 import { getUsableZoneHumidity, getUsableZoneTemp, getUserSetpointLimits, resolveSetpointBounds } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, CompressorMode, NeoCommand } from '../neo/types.js'
@@ -241,7 +240,7 @@ export class ZoneAccessory implements DisposableAccessory {
   private checkHvacComms(): void {
     if (!this.platform.state.cloudConnected) {
       this.platform.log.error('Master Controller is offline. Check Master Controller Internet/Wifi connection')
-      throw new this.platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
     }
   }
 

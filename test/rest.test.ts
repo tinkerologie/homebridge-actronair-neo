@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { NeoAuthRevokedError } from '../src/neo/auth.js'
-import { NeoApiError, NeoRest } from '../src/neo/rest.js'
+import { NeoApiError, NeoNoStatusError, NeoRest } from '../src/neo/rest.js'
 
 const restStatus = JSON.parse(readFileSync('test/fixtures/rest-status.json', 'utf8'))
 const log = {
@@ -42,6 +42,14 @@ function spyOnInstantSetTimeout() {
 }
 
 describe('neoRest', () => {
+  it('reports a system with no last-known state (a retired controller) as NeoNoStatusError', async () => {
+    const { rest } = make(vi.fn(async () => ok({ isOnline: false, lastKnownState: null })) as never)
+    const error = await rest.getStatus('dead01').catch(e => e)
+    expect(error).toBeInstanceOf(NeoNoStatusError)
+    expect(error).toBeInstanceOf(NeoApiError)
+    expect(error.message).toMatch(/dead01/)
+  })
+
   it('returns a parsed status response', async () => {
     const { rest } = make(vi.fn(async () => ok(restStatus)) as unknown as typeof fetch)
     const parsed = await rest.getStatus('neo000000')

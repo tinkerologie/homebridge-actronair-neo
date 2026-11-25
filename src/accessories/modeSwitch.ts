@@ -1,7 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
 import type { DisposableAccessory } from './disposable.js'
-import { HAPStatus } from 'homebridge'
 import { NeoCommand } from '../neo/types.js'
 import { assertCommandSuccess } from './assertCommandResult.js'
 
@@ -92,7 +91,7 @@ export class ModeSwitchAccessory implements DisposableAccessory {
 
   async setOn(value: CharacteristicValue): Promise<void> {
     if (!this.platform.state.cloudConnected)
-      throw new this.platform.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE)
 
     const on = !!value
     const command = this.mode === 'continuousFan'

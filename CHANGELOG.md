@@ -7,15 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-11-25
+
 ### Fixed
 
 - Restore CI lint compatibility and enforce aggregate validation.
-- A socket error arriving after the MQTT push connection had been torn down could crash the child bridge: listeners were removed before the socket closed, and mqtt.js re-emits coded socket errors (`ECONNRESET` and the like) as `'error'` events, which Node throws when nothing is listening. Discarded clients now keep a no-op error sink.
+- A socket error arriving after the MQTT push connection had been torn down could crash the child bridge: listeners were removed before the socket closed, and mqtt.js re-emits coded socket errors (`ECONNRESET` and the like) as `'error'` events, which Node throws when nothing is listening. Discarded clients now keep a no-op error sink. Only the plugin's own listeners are detached, so mqtt.js's internal close handler still clears its 30-second connect timer.
+- Matter accessories restored from cache now respond to commands after a restart. Homebridge attaches a plugin's handlers to a restored Matter accessory only when it is registered again, and the plugin was only updating them.
+- Moving the fan speed slider no longer switches Continuous Mode off: the speed command now keeps the `+CONT` flag, as the Continuous Mode switch and the Matter fan already did.
+- MQTT pushes that contain an apostrophe (for example a zone named "Kurt's Office") are no longer dropped. The cloud escapes apostrophes as `\'`, which is not valid JSON; the plugin now repairs that escape, as the upstream ActronAirAPI library does. A push that is still unreadable triggers a resync from the cloud instead of being silently ignored.
+- A status response that reports a model, family, serial or firmware identifier as a number instead of a string no longer fails the whole status update.
+- An account that still has a replaced or retired controller linked (one the cloud reports with no state) no longer fails discovery forever. Without a configured System Serial, the first system that actually reports state is used.
+- A new accessory that fails to initialise is no longer registered as an empty tile in HomeKit; it is retried on the next discovery.
+- The plugin no longer imports a runtime value from the `homebridge` package; HAP status codes come from `api.hap`, as Homebridge recommends.
 - Account linking in the settings page no longer trusts the ActronAir cloud's device-code response unchecked. The verification link must be `https`. A missing or too-small polling interval falls back to the RFC 8628 default of 5 seconds instead of polling the cloud in a tight loop. A response missing its code or expiry is reported as an error instead of silently "timing out".
 
 ### Security
 
 - The settings-page server rejects malformed requests from the browser (non-string, empty, or containing control characters) before anything is sent to the ActronAir cloud.
+- The account-linking link is only shown when it points at the ActronAir domain over https, and opens with `noreferrer`. Linking reports a failure instead of "Account linked" if the cloud returns no refresh token.
+- The settings page can no longer run two account-linking loops at once (for example after Cancel then Link), and no longer leaks its countdown timer.
 
 ### Changed
 

@@ -10,6 +10,29 @@ vi.mock('../src/accessories/zone.js', () => ({
   ZoneAccessory: vi.fn(),
 }))
 
+// The platform tests cover orchestration, not the HAP wrappers (each has its own test file).
+// The fake PlatformAccessory here has no services, so the real wrappers would throw on
+// construction, and the platform deliberately never registers a new accessory that failed to
+// build. Stand-ins that construct cleanly keep these tests about the platform.
+function stubWrapper() {
+  return vi.fn().mockImplementation(function (this: { dispose: () => void }) {
+    this.dispose = vi.fn()
+  })
+}
+vi.mock('../src/accessories/master.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/accessories/master.js')>(),
+  MasterAccessory: stubWrapper(),
+}))
+vi.mock('../src/accessories/modeSwitch.js', () => ({
+  ModeSwitchAccessory: stubWrapper(),
+}))
+vi.mock('../src/accessories/outdoorTemp.js', () => ({
+  OutdoorTempAccessory: stubWrapper(),
+}))
+vi.mock('../src/accessories/afterHours.js', () => ({
+  AfterHoursAccessory: stubWrapper(),
+}))
+
 vi.mock('../src/neo/mqtt.js', () => ({
   NeoMqtt: vi.fn().mockImplementation(function NeoMqtt(this: Record<string, unknown>, opts: { onHealthChange?: (healthy: boolean) => void }) {
     this.start = vi.fn().mockResolvedValue(undefined)
@@ -51,6 +74,7 @@ function makeApi(options: { matterEnabled?: boolean } = {}) {
       uuid: {
         generate: (s: string) => `uuid-${s}`,
       },
+      HAPStatus: { SERVICE_COMMUNICATION_FAILURE: -70402 },
       HapStatusError: class {},
     },
     user: {
@@ -201,6 +225,80 @@ describe('actronAirNeoPlatform', () => {
     // eslint-disable-next-line no-new
     new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', refreshInterval: 2 } as never, api)
     expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/refreshInterval/))
+  })
+
+  it('skips a system with no last-known state when picking the account\'s first system', async () => {
+    const { NeoNoStatusError } = await import('../src/neo/rest.js')
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+    const twoSystems = {
+      _embedded: {
+        'ac-system': [
+          { serial: 'dead01' },
+          ...systems._embedded['ac-system'],
+        ],
+      },
+    }
+    const getStatus = vi.fn(async (serial: string) => {
+      if (serial === 'dead01')
+        throw new NeoNoStatusError(serial)
+      return restStatus
+    })
+    p.injectForTest({
+      getSystems: async () => twoSystems,
+      getStatus,
+    } as never)
+    await p.discoverDevices()
+    expect(p.serial).toBe(systems._embedded['ac-system'][0].serial)
+    expect(api.registerPlatformAccessories).toHaveBeenCalled()
+  })
+
+  it('does not skip past a configured deviceSerial that has no last-known state', async () => {
+    const { NeoNoStatusError } = await import('../src/neo/rest.js')
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, {
+      platform: 'ActronAirNeo',
+      name: 'x',
+      refreshToken: 'rt',
+      deviceSerial: 'dead01',
+    } as never, api)
+    const twoSystems = {
+      _embedded: {
+        'ac-system': [
+          { serial: 'dead01' },
+          ...systems._embedded['ac-system'],
+        ],
+      },
+    }
+    p.injectForTest({
+      getSystems: async () => twoSystems,
+      getStatus: vi.fn(async (serial: string) => {
+        throw new NeoNoStatusError(serial)
+      }),
+    } as never)
+    await p.discoverDevices()
+    expect(p.serial).toBe('')
+    expect(api.registerPlatformAccessories).not.toHaveBeenCalled()
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/dead01/))
+  })
+
+  it('does not register a brand-new accessory whose wrapper failed to build (it would publish empty)', async () => {
+    const api = makeApi()
+    const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+    vi.mocked(ZoneAccessory).mockImplementation(class {
+      constructor() {
+        throw new Error('boom')
+      }
+    } as never)
+    p.injectForTest({
+      getSystems: async () => systems,
+      getStatus: async () => restStatus,
+    } as never)
+    await p.discoverDevices()
+    const registered = api.registerPlatformAccessories.mock.calls.flatMap((call: unknown[]) => call[2] as { context: { device: { kind: string } } }[])
+    expect(registered.length).toBeGreaterThan(0)
+    expect(registered.some(a => a.context.device.kind === 'zone')).toBe(false)
+    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/Failed to initialize accessory/))
   })
 
   it('does not start when no account is linked', async () => {
@@ -394,9 +492,9 @@ describe('actronAirNeoPlatform', () => {
 
     expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/failed to initialize accessory/i))
     const zoneCount = restStatus.lastKnownState.RemoteZoneInfo.filter((z: { NV_Exists?: boolean }) => z.NV_Exists).length
-    // The broken accessory is still registered (it exists, just uninitialized); the point is
-    // that its failure does not stop the other 1 + 3 + 1 + (zoneCount - 1) siblings from registering.
-    expect(api.registerPlatformAccessories).toHaveBeenCalledTimes(1 + 3 + 1 + zoneCount)
+    // The broken (new) accessory is not registered, since it would publish an empty tile, and
+    // its failure does not stop the other 1 + 3 + 1 + (zoneCount - 1) siblings from registering.
+    expect(api.registerPlatformAccessories).toHaveBeenCalledTimes(1 + 3 + 1 + zoneCount - 1)
   })
 
   it('logs and skips when two discovered devices collide on the same identity', async () => {
@@ -1067,6 +1165,14 @@ describe('actronAirNeoPlatform', () => {
       const cached = { UUID: 'matter-uuid-matter:neo000000', displayName: 'Master', context: {} } as never
       const stale = { UUID: 'stale', displayName: 'Removed', context: {} } as never
       p.configureMatterAccessory(cached)
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => restStatus,
+      } as never)
+      // Update only happens for accessories already registered this session, so reaching
+      // that stage needs one completed discovery first.
+      if (stage === 'update')
+        await p.discoverDevices()
       p.configureMatterAccessory(stale)
       const operation = stage === 'register'
         ? api.matter.registerPlatformAccessories
@@ -1075,10 +1181,6 @@ describe('actronAirNeoPlatform', () => {
       operation.mockImplementationOnce(() => new Promise<void>((resolve) => {
         release = resolve
       }))
-      p.injectForTest({
-        getSystems: async () => systems,
-        getStatus: async () => restStatus,
-      } as never)
       const discovery = p.discoverDevices()
       await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce())
       const trackedBeforeShutdown = p.matterAccessories.size
@@ -1160,7 +1262,10 @@ describe('actronAirNeoPlatform', () => {
       expect(p.matterAccessories.size).toBeGreaterThan(0)
     })
 
-    it('updates cached Matter accessories restored via configureMatterAccessory', async () => {
+    it('re-registers cached Matter accessories on the first sync so Homebridge attaches their handlers', async () => {
+      // Homebridge restores cached Matter endpoints with stub handlers; only
+      // registerPlatformAccessories() attaches the plugin's. update would leave every restored
+      // accessory deaf to commands until it was removed and re-added.
       const api = makeApi({ matterEnabled: true })
       const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
 
@@ -1179,8 +1284,18 @@ describe('actronAirNeoPlatform', () => {
 
       await p.discoverDevices()
 
+      const registered = api.matter.registerPlatformAccessories.mock.calls.flatMap((call: unknown[]) => call[2] as { UUID: string }[])
+      expect(registered.map(a => a.UUID)).toContain('matter-uuid-matter:neo000000')
+      expect(api.matter.updatePlatformAccessories).not.toHaveBeenCalled()
+
+      // A later rediscovery in the same session updates rather than re-registers.
+      api.matter.registerPlatformAccessories.mockClear()
+      await p.discoverDevices()
+      expect(api.matter.registerPlatformAccessories).not.toHaveBeenCalled()
       expect(api.matter.updatePlatformAccessories).toHaveBeenCalledWith(
-        expect.arrayContaining([cachedMaster]),
+        expect.arrayContaining([
+          expect.objectContaining({ UUID: 'matter-uuid-matter:neo000000' }),
+        ]),
       )
     })
 

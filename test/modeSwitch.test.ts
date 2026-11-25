@@ -1,5 +1,6 @@
 import type { StatusTree } from '../src/neo/schemas.js'
 import { readFileSync } from 'node:fs'
+import { HAPStatus } from 'homebridge'
 import { describe, expect, it, vi } from 'vitest'
 import { ModeSwitchAccessory } from '../src/accessories/modeSwitch.js'
 import { isTurboModeSupported } from '../src/neo/capabilities.js'
@@ -103,7 +104,7 @@ function makePlatform(initialTree: StatusTree, cloudConnected = true) {
       On: 'On',
     },
     api: {
-      hap: { HapStatusError: class HapStatusError extends Error {} },
+      hap: { HAPStatus, HapStatusError: class HapStatusError extends Error {} },
     },
   } as never
 }

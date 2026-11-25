@@ -17,7 +17,7 @@
 <section id="linking-view" class="panel" hidden>
   <h2 class="panel-title">Enter this code at ActronAir</h2>
   <p class="panel-lede">
-    Open <a id="verify-link" target="_blank" rel="noopener"></a>, sign in, and enter the code below.
+    Open <a id="verify-link" target="_blank" rel="noopener noreferrer"></a>, sign in, and enter the code below.
   </p>
 
   <div class="code-plate">
@@ -305,6 +305,7 @@
     }
 
     function renderCountdown(deadline) {
+      stopCountdown() // never leak a previous interval
       const el = document.getElementById('countdown')
       const tick = () => {
         const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000))
@@ -322,7 +323,13 @@
     // config.schema.json, but a custom UI suppresses that form unless it asks for it. Only show it
     // once an account is linked: before linking, none of those options do anything, and several
     // field descriptions refer to the linked-account controls above them.
+    // Bumped on every link start and every way out of the linking view. A poll loop that wakes
+    // up to find the counter moved on is stale (cancelled, or superseded by a newer Link click)
+    // and must exit without touching the UI, or it could abort the flow that replaced it.
+    let linkSession = 0
+
     function showUnlinked() {
+      linkSession++
       stopCountdown()
       homebridge.hideSchemaForm()
       showView('unlinked')
@@ -403,6 +410,7 @@
     }
 
     async function link() {
+      const session = ++linkSession
       let code
       try {
         code = await homebridge.request('/device-code', { clientId: cfg.clientId })
@@ -411,6 +419,8 @@
         homebridge.toast.error(err.message, 'Linking failed')
         return
       }
+      if (session !== linkSession)
+        return
 
       document.getElementById('user-code').textContent = code.user_code
       const link = document.getElementById('verify-link')
@@ -425,8 +435,8 @@
 
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, interval * 1000))
-        if (views.linking.hidden)
-          return // cancelled
+        if (session !== linkSession || views.linking.hidden)
+          return // cancelled or superseded
 
         let result
         try {
@@ -436,9 +446,13 @@
           })
         }
         catch (err) {
+          if (session !== linkSession)
+            return
           homebridge.toast.error(err.message, 'Linking failed')
           return showUnlinked()
         }
+        if (session !== linkSession)
+          return
 
         if (result.state === 'authorised') {
           cfg.refreshToken = result.refreshToken
@@ -454,6 +468,8 @@
         if (result.slowDown)
           interval += 5
       }
+      if (session !== linkSession)
+        return
       homebridge.toast.error('Timed out waiting for approval', 'Linking failed')
       showUnlinked()
     }

@@ -97,10 +97,21 @@ export const UserAirconSettingsSchema = z.looseObject({
  * Model/capability identity, consumed by neo/capabilities.ts to derive NeoCapabilities
  * (fan speeds, AUTO support, model label for AccessoryInformation, etc).
  */
+/**
+ * An identifier the cloud sends as a string on most units but as a bare number on some (a model
+ * number of `561`, a numeric family or serial). A strict `z.string()` would fail the whole status
+ * parse over a label (see `numeric` above for why that is so costly), so numbers are accepted and
+ * stringified. Mirrors upstream ActronAirAPI 6411d4c / fd92a1d.
+ */
+const identifier = z.union([
+  z.string(),
+  z.number(),
+]).transform(String).optional()
+
 export const AirconSystemSchema = z.looseObject({
-  MasterWCModel: z.string().optional(),
+  MasterWCModel: identifier,
   IndoorUnit: z.looseObject({
-    NV_ModelNumber: z.string().optional(),
+    NV_ModelNumber: identifier,
     // Bitmap: 1=LOW, 2=MED, 4=HIGH, 8=AUTO. Coerced — cloud numerics have arrived as
     // strings elsewhere (see ConnectionDetailsSchema.Port), and this feeds fan-speed
     // capability detection directly.
@@ -108,7 +119,7 @@ export const AirconSystemSchema = z.looseObject({
     NV_AutoFanEnabled: z.boolean().optional(),
   }).optional(),
   OutdoorUnit: z.looseObject({
-    Family: z.string().optional(),
+    Family: identifier,
     Capacity_kW: numeric,
   }).optional(),
   /**
@@ -117,7 +128,7 @@ export const AirconSystemSchema = z.looseObject({
    * NOT read directly by any accessory.
    */
   Peripherals: z.array(z.looseObject({
-    SerialNumber: z.string().optional(),
+    SerialNumber: identifier,
     ConnectionState: z.string().optional(),
     // Coerced consistent with NV_Limits/OutdoorUnit — cloud numerics have arrived as
     // strings elsewhere, and this feeds the zone Battery service directly.
@@ -191,6 +202,16 @@ export const StatusResponseSchema = z.looseObject({
   lastKnownState: StatusTreeSchema,
 })
 
+/**
+ * The wire shape of the same response: `lastKnownState` is `null` for a system that no longer
+ * reports (e.g. a replaced controller still linked to the account). Only NeoRest sees this; it
+ * turns `null` into NeoNoStatusError, so everything downstream keeps StatusResponseSchema's
+ * non-null tree.
+ */
+export const RawStatusResponseSchema = StatusResponseSchema.extend({
+  lastKnownState: StatusTreeSchema.nullable(),
+})
+
 /** MQTT full-status — same tree, nested under `event`, `lastKnownState`, or at the root. */
 export const FullStatusPushSchema = z.preprocess((val) => {
   if (typeof val !== 'object' || val === null)
@@ -203,7 +224,7 @@ export const FullStatusPushSchema = z.preprocess((val) => {
   return { event: obj, wcFirmware: obj.wcFirmware }
 }, z.looseObject({
   event: StatusTreeSchema,
-  wcFirmware: z.string().optional(),
+  wcFirmware: identifier,
 }))
 
 /** MQTT status-change — a flat delta of dotted/bracketed paths, nested under `event` or at the root. */
@@ -216,7 +237,7 @@ export const StatusChangeSchema = z.preprocess((val) => {
   return { event: obj, wcFirmware: obj.wcFirmware }
 }, z.looseObject({
   event: z.record(z.string(), z.unknown()),
-  wcFirmware: z.string().optional(),
+  wcFirmware: identifier,
 }))
 
 /**
