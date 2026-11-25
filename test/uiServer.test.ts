@@ -282,6 +282,25 @@ describe('homebridge-ui server', () => {
       expect(result).not.toHaveProperty('refreshToken')
     })
 
+    it('still hands back a rotated refresh token when the account lookup then fails', async () => {
+      // The old token may already be spent, so dropping the new one here would break the link.
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/oauth/token')
+        ? new Response(JSON.stringify({ access_token: 'a', refresh_token: 'rt-new' }), { status: 200 })
+        : new Response('{}', { status: 503 })))
+      const { default: server } = await import('../homebridge-ui/server.js')
+      const result = await server.linkedAccount({ refreshToken: 'rt' })
+      expect(result).toMatchObject({ state: 'error', refreshToken: 'rt-new' })
+      expect(result.error).toMatch(/try again/i)
+    })
+
+    it('rethrows an account failure when no token was rotated (the page shows its retry view)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => url.endsWith('/oauth/token')
+        ? new Response(JSON.stringify({ access_token: 'a' }), { status: 200 })
+        : new Response('{}', { status: 503 })))
+      const { default: server } = await import('../homebridge-ui/server.js')
+      await expect(server.linkedAccount({ refreshToken: 'rt' })).rejects.toThrow(/try again/i)
+    })
+
     it('reports an invalid link without calling the account endpoints', async () => {
       const fetchImpl = stubCloud({}, 401)
       const { default: server } = await import('../homebridge-ui/server.js')

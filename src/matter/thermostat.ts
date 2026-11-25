@@ -76,3 +76,31 @@ export function clampSetpoint(celsius: number, range: CentiRange): number {
 export function toCelsius(range: CentiRange): { min: number, max: number } {
   return { min: range.min / 100, max: range.max / 100 }
 }
+
+type LimitAttributes = ThermostatLimits['attributes']
+
+/**
+ * A thermostat cluster's attributes as an endpoint currently holds them: what Homebridge restored
+ * from its cache, or what an earlier build registered. Untyped on purpose (it comes from disk),
+ * so every value is checked before use.
+ */
+export type CachedThermostatAttributes = Partial<Record<keyof LimitAttributes, unknown>>
+
+/**
+ * The limit attributes to write when an endpoint outlives its build, or undefined when it already
+ * holds them. Homebridge never applies a re-registered or updated accessory's `clusters` to a
+ * reused endpoint, so stale limits would otherwise stay and setpoints inside the new limits would
+ * be held at, or rejected by, the old ones.
+ *
+ * All eight are returned together, to travel in the *same* write as the setpoints: Homebridge's
+ * updateAccessoryState() only emits an event and returns, so separate writes are not ordered and
+ * their failures are never reported. matter.js validates one write as a single transaction, so
+ * limits and setpoints in one write are accepted in any direction and any key order (verified on
+ * the real ThermostatServer: widening, narrowing and shifted ranges).
+ */
+export function changedLimits(previous: CachedThermostatAttributes | undefined, next: LimitAttributes): LimitAttributes | undefined {
+  const same = (Object.keys(next) as (keyof LimitAttributes)[]).every(key => previous?.[key] === next[key])
+  return same
+    ? undefined
+    : { ...next }
+}

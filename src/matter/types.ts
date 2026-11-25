@@ -1,11 +1,17 @@
 import type { MatterAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform } from '../platform.js'
+import type { CachedThermostatAttributes } from './thermostat.js'
 import { CommandResult } from '../neo/types.js'
 
 export interface MatterBinding {
   readonly uuid: string
   readonly accessory: MatterAccessory
-  update: (changed: Set<string>) => void | Promise<void>
+  /**
+   * Push the paths in `changed` (`'*'` for everything). `restoredFrom` is passed only for an
+   * endpoint that outlived its build (restored from cache, or updated in place): a thermostat
+   * then folds any changed limits into the same write as its setpoints. See changedLimits().
+   */
+  update: (changed: Set<string>, restoredFrom?: CachedThermostatAttributes) => void | Promise<void>
 }
 
 export const MATTER_STRING_MAX = 32

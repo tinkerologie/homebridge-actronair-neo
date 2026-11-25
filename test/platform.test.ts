@@ -1280,6 +1280,114 @@ describe('actronAirNeoPlatform', () => {
       expect(api.matter.unregisterPlatformAccessories).not.toHaveBeenCalled()
     })
 
+    it('moves a restored thermostat from its cached limits to the new ones in one write matter.js accepts', async () => {
+      // Homebridge keeps a restored endpoint's cached limit attributes. matter.js (ThermostatServer)
+      // rejects a user-limit write outside the current absolute limits, and an absolute-limit write
+      // that no longer nests the current user limits. These are the limits 1.3.2 could have cached:
+      // heat capped at 26 and cool floored at 20, both narrower than this unit's 16-30.
+      const cachedLimits = {
+        absMinHeatSetpointLimit: 700,
+        absMaxHeatSetpointLimit: 2600,
+        minHeatSetpointLimit: 1000,
+        maxHeatSetpointLimit: 2600,
+        absMinCoolSetpointLimit: 2000,
+        absMaxCoolSetpointLimit: 3200,
+        minCoolSetpointLimit: 2000,
+        maxCoolSetpointLimit: 3200,
+      }
+      const api = makeApi({ matterEnabled: true })
+      const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+      p.configureMatterAccessory({
+        UUID: 'matter-uuid-matter:neo000000',
+        displayName: 'Old',
+        context: {},
+        clusters: {
+          thermostat: { ...cachedLimits },
+        },
+      } as never)
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => restStatus,
+      } as never)
+
+      await p.discoverDevices()
+
+      const writes = api.matter.updateAccessoryState.mock.calls
+        .filter((call: unknown[]) => call[0] === 'matter-uuid-matter:neo000000' && call[1] === 'thermostat')
+        .map((call: unknown[]) => call[2] as Record<string, number>)
+      // Homebridge's updateAccessoryState() only emits an event, so separate writes are not
+      // ordered: the limits must travel in the same write as the setpoints. matter.js validates a
+      // write as one transaction, checking the result against its invariants at commit.
+      const limitWrites = writes.filter(w => Object.keys(w).some(k => k.endsWith('SetpointLimit')))
+      expect(limitWrites).toHaveLength(1)
+      const endpoint: Record<string, number> = {
+        ...cachedLimits,
+        ...limitWrites[0],
+      }
+      for (const scope of ['Heat', 'Cool']) {
+        expect(endpoint[`absMin${scope}SetpointLimit`]).toBeLessThanOrEqual(endpoint[`min${scope}SetpointLimit`])
+        expect(endpoint[`min${scope}SetpointLimit`]).toBeLessThanOrEqual(endpoint[`max${scope}SetpointLimit`])
+        expect(endpoint[`max${scope}SetpointLimit`]).toBeLessThanOrEqual(endpoint[`absMax${scope}SetpointLimit`])
+        const setpoint = endpoint[`occupied${scope}ingSetpoint`]
+        expect(setpoint).toBeGreaterThanOrEqual(endpoint[`min${scope}SetpointLimit`])
+        expect(setpoint).toBeLessThanOrEqual(endpoint[`max${scope}SetpointLimit`])
+      }
+      // The unit reports 16-30 for both modes: that is where the endpoint must end up.
+      expect(endpoint).toMatchObject({
+        minHeatSetpointLimit: 1600,
+        maxHeatSetpointLimit: 3000,
+        minCoolSetpointLimit: 1600,
+        maxCoolSetpointLimit: 3000,
+      })
+      expect(limitWrites[0]).toHaveProperty('occupiedHeatingSetpoint')
+    })
+
+    it('moves an already-registered thermostat to new limits when the device reports a different range', async () => {
+      // updatePlatformAccessories() merges metadata only; the live endpoint keeps the limits it
+      // was registered with, so a rediscovery that finds a new NV_Limits range must move them.
+      const api = makeApi({ matterEnabled: true })
+      const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+      let status = restStatus
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => status,
+      } as never)
+      await p.discoverDevices()
+
+      status = structuredClone(restStatus)
+      Object.assign(status.lastKnownState.NV_Limits.UserSetpoint_oC, { setHeat_Max: 28, setCool_Min: 18 })
+      api.matter.updateAccessoryState.mockClear()
+      await p.discoverDevices()
+
+      expect(api.matter.updatePlatformAccessories).toHaveBeenCalled()
+      const userLimitWrite = api.matter.updateAccessoryState.mock.calls
+        .find((call: unknown[]) => call[0] === 'matter-uuid-matter:neo000000' && 'maxHeatSetpointLimit' in (call[2] as object))
+      expect(userLimitWrite?.[2]).toMatchObject({ maxHeatSetpointLimit: 2800, minCoolSetpointLimit: 1800 })
+    })
+
+    it('leaves a restored thermostat\'s limits alone when the cache already matches', async () => {
+      const api = makeApi({ matterEnabled: true })
+      const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x', refreshToken: 'rt' } as never, api)
+      const { thermostatLimits } = await import('../src/matter/thermostat.js')
+      const current = thermostatLimits({ min: 16, max: 30 }, { min: 16, max: 30 }).attributes
+      p.configureMatterAccessory({
+        UUID: 'matter-uuid-matter:neo000000',
+        displayName: 'Old',
+        context: {},
+        clusters: {
+          thermostat: { ...current },
+        },
+      } as never)
+      p.injectForTest({
+        getSystems: async () => systems,
+        getStatus: async () => restStatus,
+      } as never)
+      await p.discoverDevices()
+      const limitWrites = api.matter.updateAccessoryState.mock.calls
+        .filter((call: unknown[]) => call[0] === 'matter-uuid-matter:neo000000' && Object.keys(call[2] as object).some(k => k.endsWith('SetpointLimit')))
+      expect(limitWrites).toHaveLength(0)
+    })
+
     it('keeps stale Matter tracking after unregister failure so discovery can retry', async () => {
       const api = makeApi({ matterEnabled: true })
       const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo' } as never, api)

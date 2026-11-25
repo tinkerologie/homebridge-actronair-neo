@@ -127,6 +127,15 @@ A Homebridge dynamic platform plugin for ActronAir Neo HVAC, talking to the Neo 
    `updatePlatformAccessories()` only merges metadata. So each cached Matter accessory is
    re-registered once per session (`matterRegistered` in `platform.ts`), and its live state is
    pushed straight after, because `NeoState` already holds it and later polls see no diff.
+   Homebridge also never applies a re-registered or updated accessory's `clusters` to a reused
+   endpoint. That has two consequences:
+   - **Limits:** a thermostat's changed limit attributes (`changedLimits()` in
+     `src/matter/thermostat.ts`) travel in the *same* write as its setpoints, via
+     `binding.update('*', restoredFrom)`. Don't split them into separate writes. Homebridge's
+     `updateAccessoryState()` only emits an event and returns, so separate writes aren't ordered
+     and their failures aren't reported. matter.js validates a single write as one transaction,
+     which was verified on the real `ThermostatServer` in every direction.
+   - **Clusters:** a zone only declares a `powerSource` cluster its cached endpoint already has.
 
 2. **`NeoState` (`src/neo/state.ts`) is the single authoritative tree.** Its change set reports
    **leaf paths, including when an optional subtree appears or disappears wholesale** — `diffPaths`

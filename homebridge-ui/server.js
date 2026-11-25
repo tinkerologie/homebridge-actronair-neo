@@ -171,7 +171,17 @@ class UiServer extends HomebridgePluginUiServer {
     const session = await this.session({ clientId, refreshToken })
     if (session.state !== 'ok')
       return { state: 'invalid' }
-    const info = await this.account({ accessToken: session.accessToken })
+    let info
+    try {
+      info = await this.account({ accessToken: session.accessToken })
+    }
+    catch (error) {
+      // A rotated token must reach the page even now: the old one may already be spent, so
+      // dropping it would turn a transient account-lookup failure into a broken link.
+      if (session.refreshToken)
+        return { state: 'error', error: error.message, refreshToken: session.refreshToken }
+      throw error
+    }
     return {
       state: 'ok',
       ...info,

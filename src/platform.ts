@@ -10,6 +10,7 @@ import type {
 } from 'homebridge'
 import type { DisposableAccessory } from './accessories/disposable.js'
 import type { NeoConfig } from './config.js'
+import type { CachedThermostatAttributes } from './matter/thermostat.js'
 import type { MatterBinding } from './matter/types.js'
 import type { NeoCapabilities } from './neo/capabilities.js'
 import { AfterHoursAccessory } from './accessories/afterHours.js'
@@ -182,15 +183,24 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     })
   }
 
+  /**
+   * Bring an endpoint that outlived its build (restored from cache, or updated in place) up to
+   * date with one full-state push, which also carries any changed thermostat limits in the same
+   * write as the setpoints (see changedLimits()).
+   */
+  private refreshRestoredMatter(uuid: string, previousThermostat: CachedThermostatAttributes | undefined): void {
+    this.pushMatterState(this.matterBindings.get(uuid), new Set(['*']), previousThermostat ?? {})
+  }
+
   /** Push changed paths to one Matter binding; a failure is logged, never thrown. */
-  private pushMatterState(binding: MatterBinding | undefined, changed: Set<string>): void {
+  private pushMatterState(binding: MatterBinding | undefined, changed: Set<string>, restoredFrom?: CachedThermostatAttributes): void {
     if (!binding)
       return
     const fail = (error: unknown): void => {
       this.log.error(`Failed to update Matter accessory "${binding.accessory.displayName}": ${(error as Error).message}`)
     }
     try {
-      const result = binding.update(changed)
+      const result = binding.update(changed, restoredFrom)
       if (result && typeof (result as Promise<unknown>).catch === 'function')
         (result as Promise<unknown>).catch(fail)
     }
@@ -473,6 +483,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     const toRegister: MatterAccessory[] = []
     const toUpdate: MatterAccessory[] = []
     const restored: string[] = []
+    /** Limit attributes each endpoint currently holds, captured before they are overwritten. */
+    const previousThermostat = new Map<string, CachedThermostatAttributes | undefined>()
 
     for (const device of discovered) {
       // Reserve the identity first so a build failure never unregisters a cached accessory.
@@ -490,6 +502,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
       this.matterBindings.set(accessory.UUID, binding)
 
       const existing = this.matterAccessories.get(accessory.UUID)
+      if (existing)
+        previousThermostat.set(accessory.UUID, existing.clusters?.thermostat as CachedThermostatAttributes | undefined)
       if (existing && this.matterRegistered.has(accessory.UUID)) {
         existing.displayName = accessory.displayName
         existing.deviceType = accessory.deviceType
@@ -521,7 +535,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         // seeds a brand-new accessory. Push the live state now, because NeoState already holds
         // it, so later polls see no diff and would otherwise never correct the stale values.
         for (const uuid of restored)
-          this.pushMatterState(this.matterBindings.get(uuid), new Set(['*']))
+          this.refreshRestoredMatter(uuid, previousThermostat.get(uuid))
       }
       catch (error) {
         for (const acc of toRegister)
@@ -536,6 +550,12 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     if (toUpdate.length > 0) {
       try {
         await matter.updatePlatformAccessories(toUpdate)
+        // update() merges metadata only; the endpoint keeps the limits it was registered with.
+        for (const acc of toUpdate) {
+          if (this.shuttingDown)
+            return
+          this.refreshRestoredMatter(acc.UUID, previousThermostat.get(acc.UUID))
+        }
       }
       catch (error) {
         this.log.error(`Failed to update Matter accessories: ${(error as Error).message}`)

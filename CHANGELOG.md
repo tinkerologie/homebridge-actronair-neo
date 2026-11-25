@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-11-25
+
+### Fixed
+
+- Matter thermostats restored after a restart, or after an upgrade from 1.3.2, now take on the device's current temperature limits. Homebridge keeps a restored accessory's cached limits, so a setpoint outside those stale limits was silently held at the old limit (for example 28°C shown as 26°C). The plugin now sends the new limits in the same update as the setpoints, so matter.js applies them together, and only when they actually differ.
+- A Matter zone whose battery sensor joins after the zone was first set up no longer logs an error on every battery update. A restored zone keeps the clusters it was cached with; the alternative, re-adding the accessory, would lose its room and automations in your Matter apps.
+- If the ActronAir cloud ever issues a new account token on the settings page and the account lookup right after it fails, the new token is still saved instead of being lost.
+
 ## [1.3.3] - 2026-11-25
 
 ### Fixed

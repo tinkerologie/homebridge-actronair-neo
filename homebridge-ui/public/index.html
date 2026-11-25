@@ -409,13 +409,16 @@
           clientId: cfg.clientId,
           refreshToken: cfg.refreshToken,
         })
-        if (info.state !== 'ok')
-          return showExpired()
+        // Save a rotated token before anything else, including on an account-lookup error.
         if (info.refreshToken && info.refreshToken !== cfg.refreshToken) {
           await saveConfig((c) => {
             c.refreshToken = info.refreshToken
           })
         }
+        if (info.state === 'error')
+          return showCloudError(new Error(info.error))
+        if (info.state !== 'ok')
+          return showExpired()
         showLinked(info)
       }
       catch (err) {

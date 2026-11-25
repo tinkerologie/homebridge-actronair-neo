@@ -5,6 +5,7 @@ import { buildMatterAccessory } from '../src/matter/mapping.js'
 import { buildMasterMatterAccessory } from '../src/matter/master.js'
 import { buildOutdoorTempMatterAccessory } from '../src/matter/sensors.js'
 import { buildSwitchMatterAccessory } from '../src/matter/switches.js'
+import { changedLimits } from '../src/matter/thermostat.js'
 import { buildAfterHoursMatterAccessory } from '../src/matter/valve.js'
 import { buildZoneMatterAccessory } from '../src/matter/zone.js'
 import { NeoState } from '../src/neo/state.js'
@@ -733,6 +734,50 @@ describe('matter layer', () => {
         expect(calls.filter(call => call[1] === 'powerSource')).toEqual([])
     })
 
+    it('a restored zone keeps the clusters its cached endpoint has: no powerSource the cache never had', () => {
+      // Homebridge reuses a restored endpoint whenever device type, parts and features match; a
+      // powerSource cluster added since is never created, so every battery update would fail.
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
+      const uuid = `matter-uuid-matter:zone-${zoneIndex}`
+      ;(platform as unknown as { matterAccessories: Map<string, unknown> }).matterAccessories = new Map([
+        [
+          uuid,
+          {
+            UUID: uuid,
+            displayName: 'Cached',
+            clusters: { thermostat: {} },
+          },
+        ],
+      ])
+      const { accessory, binding } = buildZoneMatterAccessory(platform, zone(zoneIndex))
+      expect(accessory.clusters!.powerSource).toBeUndefined()
+      matterApi.updateAccessoryState.mockClear()
+      binding.update(new Set(['*']))
+      expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource')).toEqual([])
+    })
+
+    it('a restored zone whose cache has a powerSource cluster keeps reporting its battery', () => {
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
+      const uuid = `matter-uuid-matter:zone-${zoneIndex}`
+      ;(platform as unknown as { matterAccessories: Map<string, unknown> }).matterAccessories = new Map([
+        [
+          uuid,
+          {
+            UUID: uuid,
+            displayName: 'Cached',
+            clusters: { thermostat: {}, powerSource: {} },
+          },
+        ],
+      ])
+      const { accessory, binding } = buildZoneMatterAccessory(platform, zone(zoneIndex))
+      expect(accessory.clusters!.powerSource).toBeDefined()
+      matterApi.updateAccessoryState.mockClear()
+      binding.update(new Set(['*']))
+      expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource').length).toBe(1)
+    })
+
     it('does not update a zone powerSource cluster registered without a battery', () => {
       const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
       const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
@@ -753,5 +798,82 @@ describe('matter layer', () => {
       binding.update(new Set(['*']))
       expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource')).toEqual([])
     })
+  })
+})
+
+describe('restored Matter thermostat limits (one transactional write)', () => {
+  const master = { id: 'NEO123456', displayName: 'Air Conditioner', kind: 'master' as const }
+  const zone = (zoneIndex: number) => ({
+    id: `zone-${zoneIndex}`,
+    displayName: `Zone ${zoneIndex}`,
+    kind: 'zone' as const,
+    zoneIndex,
+  })
+  // The device's 16-30 range for both modes, in 0.01 C: heat abs 700-3000, cool abs 1600-3200.
+  const next = {
+    absMinHeatSetpointLimit: 700,
+    absMaxHeatSetpointLimit: 3000,
+    minHeatSetpointLimit: 1600,
+    maxHeatSetpointLimit: 3000,
+    absMinCoolSetpointLimit: 1600,
+    absMaxCoolSetpointLimit: 3200,
+    minCoolSetpointLimit: 1600,
+    maxCoolSetpointLimit: 3000,
+  }
+  // 1.3.2 could cache heat capped at 26 and cool floored at 20.
+  const stale = {
+    absMinHeatSetpointLimit: 700,
+    absMaxHeatSetpointLimit: 2600,
+    minHeatSetpointLimit: 1000,
+    maxHeatSetpointLimit: 2600,
+    absMinCoolSetpointLimit: 2000,
+    absMaxCoolSetpointLimit: 3200,
+    minCoolSetpointLimit: 2000,
+    maxCoolSetpointLimit: 3200,
+  }
+
+  it('changedLimits: nothing when the endpoint already holds these limits', () => {
+    expect(changedLimits({ ...next }, next)).toBeUndefined()
+  })
+
+  it('changedLimits: every limit attribute when any differs, or nothing is cached', () => {
+    expect(changedLimits(stale, next)).toEqual(next)
+    expect(changedLimits(undefined, next)).toEqual(next)
+    expect(changedLimits({ ...next, maxHeatSetpointLimit: '3000' }, next)).toEqual(next) // a non-number from disk is not trusted
+  })
+
+  it.each([
+    [
+      'master',
+      (p: Parameters<typeof buildMasterMatterAccessory>[0]) => buildMasterMatterAccessory(p, master),
+      'matter-uuid-matter:NEO123456',
+    ],
+    [
+      'zone',
+      (p: Parameters<typeof buildMasterMatterAccessory>[0]) => buildZoneMatterAccessory(p, zone(0)),
+      'matter-uuid-matter:zone-0',
+    ],
+  ])('%s: a full-state push from stale limits carries the new limits and the setpoints in ONE write', (_label, build, uuid) => {
+    // Homebridge's updateAccessoryState() only emits an event, so separate writes are not
+    // ordered; matter.js validates one write as a single transaction (verified on the real
+    // ThermostatServer in every direction and key order).
+    const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+    const { binding } = build(platform)
+    matterApi.updateAccessoryState.mockClear()
+    binding.update(new Set(['*']), stale)
+    const thermostatWrites = matterApi.updateAccessoryState.mock.calls.filter(call => call[0] === uuid && call[1] === 'thermostat')
+    expect(thermostatWrites).toHaveLength(1)
+    expect(thermostatWrites[0][2]).toMatchObject(next)
+    expect(thermostatWrites[0][2]).toHaveProperty('occupiedHeatingSetpoint')
+    expect(thermostatWrites[0][2]).toHaveProperty('occupiedCoolingSetpoint')
+  })
+
+  it('an ordinary update never carries limits', () => {
+    const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+    const { binding } = buildMasterMatterAccessory(platform, master)
+    matterApi.updateAccessoryState.mockClear()
+    binding.update(new Set(['*']))
+    for (const call of matterApi.updateAccessoryState.mock.calls)
+      expect(Object.keys(call[2] as object).some(k => k.endsWith('SetpointLimit'))).toBe(false)
   })
 })
