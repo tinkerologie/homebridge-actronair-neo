@@ -557,4 +557,185 @@ describe('matter layer', () => {
       expect(matterString('Hello World               ')).toBe('Hello World')
     })
   })
+
+  // Regressions for the Matter findings in issue #52, each checked against the installed
+  // Homebridge / matter.js before being fixed.
+  describe('issue #52 hardening', () => {
+    const master = { id: 'NEO123456', displayName: 'Air Conditioner', kind: 'master' as const }
+    const zone = (zoneIndex: number) => ({
+      id: `zone-${zoneIndex}`,
+      displayName: `Zone ${zoneIndex}`,
+      kind: 'zone' as const,
+      zoneIndex,
+    })
+
+    function thermostatCalls(matterApi: { updateAccessoryState: ReturnType<typeof vi.fn> }) {
+      return matterApi.updateAccessoryState.mock.calls
+        .filter(call => call[1] === 'thermostat')
+        .map(call => call[2] as Record<string, unknown>)
+    }
+
+    it('reconciles a zone systemMode from the commanded intent, not the pre-command state', async () => {
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      platform.state.applyDelta({ 'UserAirconSettings.isOn': true, 'UserAirconSettings.Mode': 'COOL' })
+      const handlers = buildZoneMatterAccessory(platform, zone(1)).accessory.handlers!.thermostat!
+
+      // Zone 1 is disabled in the fixture; the command queue never touches NeoState, so
+      // reading state back here would snap the zone straight back to Off.
+      await handlers.systemModeChange!({ systemMode: 3 })
+      expect(thermostatCalls(matterApi).at(-1)).toEqual({ systemMode: 3 })
+
+      const enabled = buildZoneMatterAccessory(platform, zone(0)).accessory.handlers!.thermostat!
+      await enabled.systemModeChange!({ systemMode: 0 })
+      expect(thermostatCalls(matterApi).at(-1)).toEqual({ systemMode: 0 })
+    })
+
+    it('shows a zone turned on while the master is off as Off', async () => {
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      const handlers = buildZoneMatterAccessory(platform, zone(1)).accessory.handlers!.thermostat!
+      await handlers.systemModeChange!({ systemMode: 1 })
+      expect(thermostatCalls(matterApi).at(-1)).toEqual({ systemMode: 0 })
+    })
+
+    it('never reports fan mode Auto when the unit has no auto fan', () => {
+      const { platform, matterApi } = makePlatform()
+      ;(platform as { capabilities: { fanSpeeds: string[] } }).capabilities.fanSpeeds = ['LOW', 'MED', 'HIGH']
+      platform.state.applyDelta({ 'UserAirconSettings.isOn': true, 'UserAirconSettings.FanMode': 'AUTO' })
+
+      const { accessory, binding } = buildMasterMatterAccessory(platform, master)
+      const fan = accessory.parts!.find(p => p.id === 'fan')!.clusters!.fanControl!
+      // matter.js rejects fanMode Auto (5) without the Auto feature, which Homebridge only
+      // adds for an Auto fanModeSequence: the whole endpoint fails to initialise.
+      expect(fan.fanModeSequence).toBe(0)
+      expect(fan.fanMode).toBe(3)
+
+      binding.update(new Set(['UserAirconSettings.FanMode']))
+      const fanUpdate = matterApi.updateAccessoryState.mock.calls.find(call => call[1] === 'fanControl')![2]
+      expect(fanUpdate.fanMode).toBe(3)
+    })
+
+    it('still reports fan mode Auto when the unit supports it', () => {
+      const { platform } = makePlatform()
+      platform.state.applyDelta({ 'UserAirconSettings.isOn': true, 'UserAirconSettings.FanMode': 'AUTO' })
+      const { accessory } = buildMasterMatterAccessory(platform, master)
+      expect(accessory.parts!.find(p => p.id === 'fan')!.clusters!.fanControl!.fanMode).toBe(5)
+    })
+
+    it('keeps thermostat limits inside the absolute limits and ordered for Auto mode', () => {
+      const { platform } = makePlatform()
+      platform.state.applyDelta({
+        'NV_Limits.UserSetpoint_oC.setHeat_Min': 18,
+        'NV_Limits.UserSetpoint_oC.setHeat_Max': 32,
+        'NV_Limits.UserSetpoint_oC.setCool_Min': 15,
+        'NV_Limits.UserSetpoint_oC.setCool_Max': 31,
+      })
+
+      for (const { accessory } of [
+        buildMasterMatterAccessory(platform, master),
+        buildZoneMatterAccessory(platform, zone(0)),
+      ]) {
+        const t = accessory.clusters!.thermostat! as Record<string, number>
+        expect(t.absMinHeatSetpointLimit).toBeLessThanOrEqual(t.minHeatSetpointLimit)
+        expect(t.maxHeatSetpointLimit).toBeLessThanOrEqual(t.absMaxHeatSetpointLimit)
+        expect(t.absMinCoolSetpointLimit).toBeLessThanOrEqual(t.minCoolSetpointLimit)
+        expect(t.maxCoolSetpointLimit).toBeLessThanOrEqual(t.absMaxCoolSetpointLimit)
+        // AutoMode with a zero deadband: matter.js requires minCool >= minHeat, maxCool >= maxHeat.
+        expect(t.minCoolSetpointLimit).toBeGreaterThanOrEqual(t.minHeatSetpointLimit)
+        expect(t.maxCoolSetpointLimit).toBeGreaterThanOrEqual(t.maxHeatSetpointLimit)
+        // The device's own range is honoured, not narrowed to the spec defaults.
+        expect(t.minHeatSetpointLimit).toBe(1800)
+        expect(t.maxCoolSetpointLimit).toBe(3100)
+      }
+    })
+
+    it('clamps reported setpoints into the advertised limits', () => {
+      const { platform, matterApi } = makePlatform()
+      platform.state.applyDelta({
+        'UserAirconSettings.TemperatureSetpoint_Heat_oC': 12,
+        'UserAirconSettings.TemperatureSetpoint_Cool_oC': 35,
+        'RemoteZoneInfo[0].TemperatureSetpoint_Heat_oC': 12,
+      })
+
+      const m = buildMasterMatterAccessory(platform, master)
+      expect(m.accessory.clusters!.thermostat!.occupiedHeatingSetpoint).toBe(1600)
+      expect(m.accessory.clusters!.thermostat!.occupiedCoolingSetpoint).toBe(3000)
+      const z = buildZoneMatterAccessory(platform, zone(0))
+      expect(z.accessory.clusters!.thermostat!.occupiedHeatingSetpoint).toBe(1600)
+
+      // An out-of-range setpoint pushed later is rejected by matter.js, and Homebridge logs
+      // that at error level on every poll, so it must be clamped too.
+      m.binding.update(new Set(['*']))
+      z.binding.update(new Set(['*']))
+      const [masterUpdate, zoneUpdate] = thermostatCalls(matterApi)
+      expect(masterUpdate.occupiedHeatingSetpoint).toBe(1600)
+      expect(masterUpdate.occupiedCoolingSetpoint).toBe(3000)
+      expect(zoneUpdate.occupiedHeatingSetpoint).toBe(1600)
+    })
+
+    it('clamps master setpoint writes into the advertised limits', async () => {
+      const { platform, commands } = makePlatform()
+      const handlers = buildMasterMatterAccessory(platform, master).accessory.handlers!.thermostat!
+      await handlers.occupiedHeatingSetpointChange!({ occupiedHeatingSetpoint: 3500 })
+      expect(commands.run).toHaveBeenCalledWith(NeoCommand.HEAT_SET_POINT, { heatTemp: 30 })
+      await handlers.occupiedCoolingSetpointChange!({ occupiedCoolingSetpoint: 1000 })
+      expect(commands.run).toHaveBeenCalledWith(NeoCommand.COOL_SET_POINT, { coolTemp: 16 })
+    })
+
+    it('reports localTemperature as null, not 21C, when there is no reading', () => {
+      const { platform } = makePlatform()
+      platform.state.applyDelta({ 'MasterInfo.LiveTemp_oC': 999, 'RemoteZoneInfo[0].LiveTemp_oC': 999 })
+      expect(buildMasterMatterAccessory(platform, master).accessory.clusters!.thermostat!.localTemperature).toBeNull()
+      expect(buildZoneMatterAccessory(platform, zone(0)).accessory.clusters!.thermostat!.localTemperature).toBeNull()
+    })
+
+    it('does not update parts or clusters that were never registered', () => {
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: false })
+      platform.state.applyDelta({
+        'MasterInfo.LiveHumidity_pc': 999,
+        'RemoteZoneInfo[0].LiveTemp_oC': 999,
+        'RemoteZoneInfo[0].LiveHumidity_pc': 999,
+      })
+      const m = buildMasterMatterAccessory(platform, master)
+      const z = buildZoneMatterAccessory(platform, zone(0))
+      expect(m.accessory.parts!.map(p => p.id)).toEqual(['fan'])
+      expect(z.accessory.parts).toEqual([])
+      const zoneHasBattery = z.accessory.clusters!.powerSource !== undefined
+
+      // Readings (and a battery) appear after registration: the parts still don't exist,
+      // and Homebridge logs "Part ... not found" at error level for every such update.
+      platform.state.applyDelta({
+        'MasterInfo.LiveHumidity_pc': 50,
+        'RemoteZoneInfo[0].LiveTemp_oC': 21,
+        'RemoteZoneInfo[0].LiveHumidity_pc': 50,
+      })
+      m.binding.update(new Set(['*']))
+      z.binding.update(new Set(['*']))
+
+      const calls = matterApi.updateAccessoryState.mock.calls
+      expect(calls.filter(call => call[3] === 'humidity' || call[3] === 'temperature')).toEqual([])
+      if (!zoneHasBattery)
+        expect(calls.filter(call => call[1] === 'powerSource')).toEqual([])
+    })
+
+    it('does not update a zone powerSource cluster registered without a battery', () => {
+      const { platform, matterApi } = makePlatform({ zonesAsHeaterCoolers: true })
+      const zoneIndex = [0, 1, 2, 3, 4, 5, 6, 7].find(zi => buildZoneMatterAccessory(platform, zone(zi)).accessory.clusters!.powerSource !== undefined)!
+      expect(zoneIndex).toBeDefined()
+
+      // Register while the wireless sensor's peripheral can't be joined (no battery known)...
+      const snapshot = JSON.parse(JSON.stringify(restStatus.lastKnownState))
+      const unjoined = JSON.parse(JSON.stringify(snapshot))
+      for (const p of unjoined.AirconSystem.Peripherals)
+        p.SerialNumber = `x-${p.SerialNumber}`
+      platform.state.replace(unjoined)
+      const { accessory, binding } = buildZoneMatterAccessory(platform, zone(zoneIndex))
+      expect(accessory.clusters!.powerSource).toBeUndefined()
+
+      // ...then the battery shows up. The endpoint has no PowerSource cluster to update.
+      platform.state.replace(snapshot)
+      matterApi.updateAccessoryState.mockClear()
+      binding.update(new Set(['*']))
+      expect(matterApi.updateAccessoryState.mock.calls.filter(call => call[1] === 'powerSource')).toEqual([])
+    })
+  })
 })

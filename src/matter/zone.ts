@@ -5,6 +5,7 @@ import type { MatterBinding } from './types.js'
 import { getUsableZoneHumidity, getUsableZoneTemp, getUserSetpointLimits, resolveSetpointBounds } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, NeoCommand } from '../neo/types.js'
+import { clampSetpoint, thermostatLimits, toCelsius } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -59,8 +60,12 @@ export function buildZoneMatterAccessory(
   const zi = device.zoneIndex!
   const uuid = matter.uuid.generate(`matter:${device.id}`)
 
-  const heatBounds = resolveSetpointBounds(platform.state, 'heat', zi)
-  const coolBounds = resolveSetpointBounds(platform.state, 'cool', zi)
+  const limits = thermostatLimits(
+    resolveSetpointBounds(platform.state, 'heat', zi),
+    resolveSetpointBounds(platform.state, 'cool', zi),
+  )
+  const heatBounds = toCelsius(limits.heat)
+  const coolBounds = toCelsius(limits.cool)
 
   const paths = {
     coolSetpoint: `RemoteZoneInfo[${zi}].TemperatureSetpoint_Cool_oC`,
@@ -68,10 +73,17 @@ export function buildZoneMatterAccessory(
     zonePosition: `RemoteZoneInfo[${zi}].ZonePosition`,
   }
 
-  function getZoneEnabled(): boolean {
+  /**
+   * `intent` overrides the zone's own enabled flag with a just-commanded value: the command
+   * queue never writes NeoState, so state still holds the pre-command value until the next
+   * poll or push reports the change.
+   */
+  function getZoneEnabled(intent?: boolean): boolean {
     const isMasterOn = platform.state.get<boolean>('UserAirconSettings.isOn')
     if (!isMasterOn)
       return false
+    if (intent !== undefined)
+      return intent
     const enabledZones = platform.state.get<boolean[]>('UserAirconSettings.EnabledZones')
     if (enabledZones && enabledZones[zi] !== undefined)
       return enabledZones[zi]
@@ -81,8 +93,8 @@ export function buildZoneMatterAccessory(
       : false
   }
 
-  function getZoneSystemMode(): MatterSystemMode {
-    if (!getZoneEnabled())
+  function getZoneSystemMode(intent?: boolean): MatterSystemMode {
+    if (!getZoneEnabled(intent))
       return MatterSystemMode.Off
 
     const mode = platform.state.get<string>('UserAirconSettings.Mode')
@@ -116,10 +128,14 @@ export function buildZoneMatterAccessory(
   const liveTemp = getUsableZoneTemp(platform.state, zi)
   const initialTemp = liveTemp !== undefined
     ? Math.round(liveTemp * 100)
-    : 2100
-  const initialHeat = Math.round((platform.state.get<number>(paths.heatSetpoint) ?? 20) * 100)
-  const initialCool = Math.round((platform.state.get<number>(paths.coolSetpoint) ?? 24) * 100)
+    : null
+  const initialHeat = clampSetpoint(platform.state.get<number>(paths.heatSetpoint) ?? 20, limits.heat)
+  const initialCool = clampSetpoint(platform.state.get<number>(paths.coolSetpoint) ?? 24, limits.cool)
+  // Clusters and parts are fixed at registration: update() may only target those added here.
   const batteryState = getBatteryState()
+  const hasPowerSource = batteryState !== undefined
+  let hasTemperaturePart = false
+  let hasHumidityPart = false
 
   let accessory: MatterAccessory
 
@@ -130,14 +146,7 @@ export function buildZoneMatterAccessory(
         occupiedHeatingSetpoint: initialHeat,
         occupiedCoolingSetpoint: initialCool,
         localTemperature: initialTemp,
-        minHeatSetpointLimit: heatBounds.min * 100,
-        maxHeatSetpointLimit: heatBounds.max * 100,
-        minCoolSetpointLimit: coolBounds.min * 100,
-        maxCoolSetpointLimit: coolBounds.max * 100,
-        absMinHeatSetpointLimit: 700,
-        absMaxHeatSetpointLimit: 3000,
-        absMinCoolSetpointLimit: 1600,
-        absMaxCoolSetpointLimit: 3200,
+        ...limits.attributes,
         minSetpointDeadBand: 0,
         controlSequenceOfOperation: 4,
       },
@@ -169,7 +178,7 @@ export function buildZoneMatterAccessory(
             )
             platform.log.debug(`Matter set Zone ${zi} (${device.displayName}) mode -> ${systemMode} (enable: ${enable})`)
             platform.api.matter?.updateAccessoryState(uuid, 'thermostat', {
-              systemMode: getZoneSystemMode(),
+              systemMode: getZoneSystemMode(enable),
             }).catch((err) => {
               platform.log.debug(`Failed to reconcile Matter zone ${zi} systemMode: ${(err as Error).message}`)
             })
@@ -231,6 +240,7 @@ export function buildZoneMatterAccessory(
     const parts: MatterAccessoryPart[] = []
 
     if (liveTemp !== undefined) {
+      hasTemperaturePart = true
       parts.push({
         id: 'temperature',
         displayName: matterString(`${device.displayName} Temperature`),
@@ -245,6 +255,7 @@ export function buildZoneMatterAccessory(
 
     const liveHumidity = getUsableZoneHumidity(platform.state, zi)
     if (liveHumidity !== undefined) {
+      hasHumidityPart = true
       parts.push({
         id: 'humidity',
         displayName: matterString(`${device.displayName} Humidity`),
@@ -316,12 +327,12 @@ export function buildZoneMatterAccessory(
         if (all || changed.has(paths.heatSetpoint)) {
           const heat = platform.state.get<number>(paths.heatSetpoint)
           if (heat !== undefined)
-            update.occupiedHeatingSetpoint = Math.round(heat * 100)
+            update.occupiedHeatingSetpoint = clampSetpoint(heat, limits.heat)
         }
         if (all || changed.has(paths.coolSetpoint)) {
           const cool = platform.state.get<number>(paths.coolSetpoint)
           if (cool !== undefined)
-            update.occupiedCoolingSetpoint = Math.round(cool * 100)
+            update.occupiedCoolingSetpoint = clampSetpoint(cool, limits.cool)
         }
         if (all || sensorChanged || zoneChanged) {
           const currentTemp = getUsableZoneTemp(platform.state, zi)
@@ -345,7 +356,7 @@ export function buildZoneMatterAccessory(
             platform.log.debug(`Failed to update Matter zone ${zi} switch state: ${(err as Error).message}`)
           })
         }
-        if (all || sensorChanged || zoneChanged) {
+        if (hasTemperaturePart && (all || sensorChanged || zoneChanged)) {
           const currentTemp = getUsableZoneTemp(platform.state, zi)
           platform.api.matter?.updateAccessoryState(
             uuid,
@@ -359,6 +370,8 @@ export function buildZoneMatterAccessory(
           ).catch((err) => {
             platform.log.debug(`Failed to update Matter zone ${zi} temperature: ${(err as Error).message}`)
           })
+        }
+        if (hasHumidityPart && (all || sensorChanged || zoneChanged)) {
           const currentHum = getUsableZoneHumidity(platform.state, zi)
           platform.api.matter?.updateAccessoryState(
             uuid,
@@ -375,7 +388,7 @@ export function buildZoneMatterAccessory(
         }
       }
 
-      if (all || sensorChanged) {
+      if (hasPowerSource && (all || sensorChanged)) {
         const bat = getBatteryState()
         if (bat) {
           platform.api.matter?.updateAccessoryState(uuid, 'powerSource', bat).catch((err) => {
