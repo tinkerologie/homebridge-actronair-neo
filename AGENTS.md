@@ -289,3 +289,17 @@ These rules apply to every contributor, including AI coding agents. The full org
 7. **Stale items.** Issues and PRs with no activity for 14 days are labeled `stale` and closed 30
    days later unless there is new activity. These labels are exempt:
    - Stale exemptions follow the [organisation's protected-label policy](https://github.com/tinkerologie/.github/blob/main/GOVERNANCE.md#5-stale-items), including Matt Pocock workflow states. Repository-specific exemptions are in `.github/workflows/stale.yml`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues on `tinkerologie/homebridge-actronair-neo`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default triage labels are used as named (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, both created only when first needed. See `docs/agents/domain.md`.
