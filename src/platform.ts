@@ -185,31 +185,22 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
 
   /**
    * Bring an endpoint that outlived its build (restored from cache, or updated in place) up to
-   * date: limits first, in writes matter.js accepts, then the full live state. Logged, never
-   * thrown, so one accessory cannot stop the others.
+   * date with one full-state push, which also carries any changed thermostat limits in the same
+   * write as the setpoints (see changedLimits()).
    */
-  private async refreshRestoredMatter(uuid: string, previousThermostat: CachedThermostatAttributes | undefined): Promise<void> {
-    const binding = this.matterBindings.get(uuid)
-    if (!binding)
-      return
-    try {
-      await binding.reconcileLimits?.(previousThermostat)
-    }
-    catch (error) {
-      this.log.error(`Failed to update Matter accessory "${binding.accessory.displayName}" limits: ${(error as Error).message}`)
-    }
-    this.pushMatterState(binding, new Set(['*']))
+  private refreshRestoredMatter(uuid: string, previousThermostat: CachedThermostatAttributes | undefined): void {
+    this.pushMatterState(this.matterBindings.get(uuid), new Set(['*']), previousThermostat ?? {})
   }
 
   /** Push changed paths to one Matter binding; a failure is logged, never thrown. */
-  private pushMatterState(binding: MatterBinding | undefined, changed: Set<string>): void {
+  private pushMatterState(binding: MatterBinding | undefined, changed: Set<string>, restoredFrom?: CachedThermostatAttributes): void {
     if (!binding)
       return
     const fail = (error: unknown): void => {
       this.log.error(`Failed to update Matter accessory "${binding.accessory.displayName}": ${(error as Error).message}`)
     }
     try {
-      const result = binding.update(changed)
+      const result = binding.update(changed, restoredFrom)
       if (result && typeof (result as Promise<unknown>).catch === 'function')
         (result as Promise<unknown>).catch(fail)
     }
@@ -544,7 +535,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         // seeds a brand-new accessory. Push the live state now, because NeoState already holds
         // it, so later polls see no diff and would otherwise never correct the stale values.
         for (const uuid of restored)
-          await this.refreshRestoredMatter(uuid, previousThermostat.get(uuid))
+          this.refreshRestoredMatter(uuid, previousThermostat.get(uuid))
       }
       catch (error) {
         for (const acc of toRegister)
@@ -563,7 +554,7 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
         for (const acc of toUpdate) {
           if (this.shuttingDown)
             return
-          await this.refreshRestoredMatter(acc.UUID, previousThermostat.get(acc.UUID))
+          this.refreshRestoredMatter(acc.UUID, previousThermostat.get(acc.UUID))
         }
       }
       catch (error) {

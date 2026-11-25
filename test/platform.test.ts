@@ -1280,7 +1280,7 @@ describe('actronAirNeoPlatform', () => {
       expect(api.matter.unregisterPlatformAccessories).not.toHaveBeenCalled()
     })
 
-    it('moves a restored thermostat from its cached limits to the new ones in writes matter.js accepts', async () => {
+    it('moves a restored thermostat from its cached limits to the new ones in one write matter.js accepts', async () => {
       // Homebridge keeps a restored endpoint's cached limit attributes. matter.js (ThermostatServer)
       // rejects a user-limit write outside the current absolute limits, and an absolute-limit write
       // that no longer nests the current user limits. These are the limits 1.3.2 could have cached:
@@ -1315,30 +1315,22 @@ describe('actronAirNeoPlatform', () => {
       const writes = api.matter.updateAccessoryState.mock.calls
         .filter((call: unknown[]) => call[0] === 'matter-uuid-matter:neo000000' && call[1] === 'thermostat')
         .map((call: unknown[]) => call[2] as Record<string, number>)
-      // Replay every write through matter.js's rules, starting from the cached state.
-      const endpoint: Record<string, number> = { ...cachedLimits }
-      for (const write of writes) {
-        for (const [key, value] of Object.entries(write)) {
-          const scope = key.includes('Heat')
-            ? 'Heat'
-            : 'Cool'
-          if (/^(?:min|max)(?:Heat|Cool)SetpointLimit$/.test(key)) {
-            expect(value, `${key} within current abs limits`).toBeGreaterThanOrEqual(endpoint[`absMin${scope}SetpointLimit`])
-            expect(value, `${key} within current abs limits`).toBeLessThanOrEqual(endpoint[`absMax${scope}SetpointLimit`])
-          }
-          if (key.startsWith('absMin'))
-            expect(value, `${key} nests current min`).toBeLessThanOrEqual(endpoint[`min${scope}SetpointLimit`])
-          if (key.startsWith('absMax'))
-            expect(value, `${key} nests current max`).toBeGreaterThanOrEqual(endpoint[`max${scope}SetpointLimit`])
-          if (key === 'occupiedHeatingSetpoint' || key === 'occupiedCoolingSetpoint') {
-            const s = key === 'occupiedHeatingSetpoint'
-              ? 'Heat'
-              : 'Cool'
-            expect(value).toBeGreaterThanOrEqual(endpoint[`min${s}SetpointLimit`])
-            expect(value).toBeLessThanOrEqual(endpoint[`max${s}SetpointLimit`])
-          }
-          endpoint[key] = value
-        }
+      // Homebridge's updateAccessoryState() only emits an event, so separate writes are not
+      // ordered: the limits must travel in the same write as the setpoints. matter.js validates a
+      // write as one transaction, checking the result against its invariants at commit.
+      const limitWrites = writes.filter(w => Object.keys(w).some(k => k.endsWith('SetpointLimit')))
+      expect(limitWrites).toHaveLength(1)
+      const endpoint: Record<string, number> = {
+        ...cachedLimits,
+        ...limitWrites[0],
+      }
+      for (const scope of ['Heat', 'Cool']) {
+        expect(endpoint[`absMin${scope}SetpointLimit`]).toBeLessThanOrEqual(endpoint[`min${scope}SetpointLimit`])
+        expect(endpoint[`min${scope}SetpointLimit`]).toBeLessThanOrEqual(endpoint[`max${scope}SetpointLimit`])
+        expect(endpoint[`max${scope}SetpointLimit`]).toBeLessThanOrEqual(endpoint[`absMax${scope}SetpointLimit`])
+        const setpoint = endpoint[`occupied${scope}ingSetpoint`]
+        expect(setpoint).toBeGreaterThanOrEqual(endpoint[`min${scope}SetpointLimit`])
+        expect(setpoint).toBeLessThanOrEqual(endpoint[`max${scope}SetpointLimit`])
       }
       // The unit reports 16-30 for both modes: that is where the endpoint must end up.
       expect(endpoint).toMatchObject({
@@ -1347,7 +1339,7 @@ describe('actronAirNeoPlatform', () => {
         minCoolSetpointLimit: 1600,
         maxCoolSetpointLimit: 3000,
       })
-      expect(writes.some(w => 'occupiedHeatingSetpoint' in w)).toBe(true)
+      expect(limitWrites[0]).toHaveProperty('occupiedHeatingSetpoint')
     })
 
     it('moves an already-registered thermostat to new limits when the device reports a different range', async () => {

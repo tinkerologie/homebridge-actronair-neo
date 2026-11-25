@@ -6,7 +6,7 @@ import type { MatterBinding } from './types.js'
 import { getUsableZoneHumidity, getUsableZoneTemp, resolveSetpointBounds, resolveZoneVariance } from '../neo/capabilities.js'
 import { resolveZoneSensor } from '../neo/sensors.js'
 import { ClimateMode, NeoCommand } from '../neo/types.js'
-import { clampSetpoint, reconcileThermostatLimits, thermostatLimits, toCelsius } from './thermostat.js'
+import { changedLimits, clampSetpoint, thermostatLimits, toCelsius } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -314,17 +314,7 @@ export function buildZoneMatterAccessory(
   const binding: MatterBinding = {
     uuid,
     accessory,
-    // Only the thermostat form of a zone has limits; the switch form has nothing to reconcile.
-    ...(platform.cfg.zonesAsHeaterCoolers
-      ? {
-          reconcileLimits: (previous: CachedThermostatAttributes | undefined) => reconcileThermostatLimits(
-            attributes => platform.api.matter?.updateAccessoryState(uuid, 'thermostat', attributes),
-            previous,
-            limits.attributes,
-          ),
-        }
-      : {}),
-    update: (changed: Set<string>) => {
+    update: (changed: Set<string>, restoredFrom?: CachedThermostatAttributes) => {
       const all = changed.has('*')
       const prefix = `RemoteZoneInfo[${zi}]`
       const enabledChanged = all || [...changed].some(p => p.startsWith('UserAirconSettings.EnabledZones'))
@@ -357,6 +347,9 @@ export function buildZoneMatterAccessory(
             : null
         }
 
+        // Limits ride in the same write as the setpoints: one transaction, nothing to race.
+        if (restoredFrom)
+          Object.assign(update, changedLimits(restoredFrom, limits.attributes))
         if (Object.keys(update).length > 0) {
           platform.api.matter?.updateAccessoryState(uuid, 'thermostat', update).catch((err) => {
             platform.log.debug(`Failed to update Matter zone ${zi} thermostat state: ${(err as Error).message}`)

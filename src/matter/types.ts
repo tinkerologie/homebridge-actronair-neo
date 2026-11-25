@@ -6,15 +6,12 @@ import { CommandResult } from '../neo/types.js'
 export interface MatterBinding {
   readonly uuid: string
   readonly accessory: MatterAccessory
-  update: (changed: Set<string>) => void | Promise<void>
   /**
-   * Thermostat bindings only. Moves the live endpoint from the limit attributes it was created
-   * with (`previous`: a cache restore or an earlier registration) to this build's limits.
-   * Homebridge never applies a re-registered or updated accessory's `clusters` to an existing
-   * endpoint, so without this a setpoint inside the new limits but outside the stale ones is
-   * rejected on every update. See limitTransitions() in thermostat.ts.
+   * Push the paths in `changed` (`'*'` for everything). `restoredFrom` is passed only for an
+   * endpoint that outlived its build (restored from cache, or updated in place): a thermostat
+   * then folds any changed limits into the same write as its setpoints. See changedLimits().
    */
-  reconcileLimits?: (previous: CachedThermostatAttributes | undefined) => Promise<void>
+  update: (changed: Set<string>, restoredFrom?: CachedThermostatAttributes) => void | Promise<void>
 }
 
 export const MATTER_STRING_MAX = 32

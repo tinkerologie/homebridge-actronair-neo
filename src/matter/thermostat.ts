@@ -78,7 +78,6 @@ export function toCelsius(range: CentiRange): { min: number, max: number } {
 }
 
 type LimitAttributes = ThermostatLimits['attributes']
-type LimitWrite = Partial<LimitAttributes>
 
 /**
  * A thermostat cluster's attributes as an endpoint currently holds them: what Homebridge restored
@@ -88,58 +87,20 @@ type LimitWrite = Partial<LimitAttributes>
 export type CachedThermostatAttributes = Partial<Record<keyof LimitAttributes, unknown>>
 
 /**
- * The writes that move an endpoint from `previous` limit attributes to `next`, in an order
- * matter.js accepts. ThermostatServer rejects a user-limit write outside the *current* absolute
- * limits, and an absolute-limit write that no longer nests the *current* user limits, so one
- * combined write can fail whichever way the ranges moved. Three steps always work:
+ * The limit attributes to write when an endpoint outlives its build, or undefined when it already
+ * holds them. Homebridge never applies a re-registered or updated accessory's `clusters` to a
+ * reused endpoint, so stale limits would otherwise stay and setpoints inside the new limits would
+ * be held at, or rejected by, the old ones.
  *
- * 1. widen the absolute limits to cover both the old and the new user limits;
- * 2. write the new user limits (matter.js reconciles setpoints into them itself);
- * 3. tighten the absolute limits to their new values (skipped when step 1 already did).
- *
- * Returns no writes when nothing differs, so an unchanged cache costs nothing.
+ * All eight are returned together, to travel in the *same* write as the setpoints: Homebridge's
+ * updateAccessoryState() only emits an event and returns, so separate writes are not ordered and
+ * their failures are never reported. matter.js validates one write as a single transaction, so
+ * limits and setpoints in one write are accepted in any direction and any key order (verified on
+ * the real ThermostatServer: widening, narrowing and shifted ranges).
  */
-export function limitTransitions(previous: CachedThermostatAttributes | undefined, next: LimitAttributes): LimitWrite[] {
-  const old = (key: keyof LimitAttributes): number | undefined => {
-    const value = previous?.[key]
-    return typeof value === 'number' && Number.isFinite(value)
-      ? value
-      : undefined
-  }
-  if ((Object.keys(next) as (keyof LimitAttributes)[]).every(key => old(key) === next[key]))
-    return []
-
-  const widen: LimitWrite = {}
-  const user: LimitWrite = {}
-  const tighten: LimitWrite = {}
-  for (const scope of ['Heat', 'Cool'] as const) {
-    const absMin = `absMin${scope}SetpointLimit` as const
-    const absMax = `absMax${scope}SetpointLimit` as const
-    const min = `min${scope}SetpointLimit` as const
-    const max = `max${scope}SetpointLimit` as const
-    widen[absMin] = Math.min(next[absMin], next[min], old(absMin) ?? next[absMin], old(min) ?? next[absMin])
-    widen[absMax] = Math.max(next[absMax], next[max], old(absMax) ?? next[absMax], old(max) ?? next[absMax])
-    user[min] = next[min]
-    user[max] = next[max]
-    tighten[absMin] = next[absMin]
-    tighten[absMax] = next[absMax]
-  }
-  const widenIsFinal = (Object.keys(tighten) as (keyof LimitAttributes)[]).every(key => widen[key] === tighten[key])
-  return widenIsFinal
-    ? [widen, user]
-    : [widen, user, tighten]
-}
-
-/**
- * Apply limitTransitions() to a live endpoint through `write` (an updateAccessoryState call for
- * the thermostat cluster). Sequential on purpose: each write is checked against the state the
- * previous one left.
- */
-export async function reconcileThermostatLimits(
-  write: (attributes: LimitWrite) => Promise<unknown> | undefined,
-  previous: CachedThermostatAttributes | undefined,
-  next: LimitAttributes,
-): Promise<void> {
-  for (const step of limitTransitions(previous, next))
-    await write(step)
+export function changedLimits(previous: CachedThermostatAttributes | undefined, next: LimitAttributes): LimitAttributes | undefined {
+  const same = (Object.keys(next) as (keyof LimitAttributes)[]).every(key => previous?.[key] === next[key])
+  return same
+    ? undefined
+    : { ...next }
 }

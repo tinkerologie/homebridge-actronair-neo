@@ -1,9 +1,10 @@
 import type { MatterAccessory } from 'homebridge'
 import type { ActronAirNeoPlatform, Discovered } from '../platform.js'
+import type { CachedThermostatAttributes } from './thermostat.js'
 import type { MatterBinding } from './types.js'
 import { getUsableMasterHumidity, getUsableMasterTemp, resolveSetpointBounds } from '../neo/capabilities.js'
 import { ClimateMode, FanMode, NeoCommand } from '../neo/types.js'
-import { clampSetpoint, reconcileThermostatLimits, thermostatLimits } from './thermostat.js'
+import { changedLimits, clampSetpoint, thermostatLimits } from './thermostat.js'
 import { assertMatterCommandSuccess, matterString } from './types.js'
 
 type MatterAccessoryPart = NonNullable<MatterAccessory['parts']>[number]
@@ -290,12 +291,7 @@ export function buildMasterMatterAccessory(
   const binding: MatterBinding = {
     uuid,
     accessory,
-    reconcileLimits: previous => reconcileThermostatLimits(
-      attributes => platform.api.matter?.updateAccessoryState(uuid, 'thermostat', attributes),
-      previous,
-      limits.attributes,
-    ),
-    update: (changed: Set<string>) => {
+    update: (changed: Set<string>, restoredFrom?: CachedThermostatAttributes) => {
       const all = changed.has('*')
       const thermostatUpdate: Record<string, unknown> = {}
 
@@ -319,6 +315,9 @@ export function buildMasterMatterAccessory(
           : null
       }
 
+      // Limits ride in the same write as the setpoints: one transaction, nothing to race.
+      if (restoredFrom)
+        Object.assign(thermostatUpdate, changedLimits(restoredFrom, limits.attributes))
       if (Object.keys(thermostatUpdate).length > 0) {
         platform.api.matter?.updateAccessoryState(uuid, 'thermostat', thermostatUpdate).catch((err) => {
           platform.log.debug(`Failed to update Matter master thermostat state: ${(err as Error).message}`)
