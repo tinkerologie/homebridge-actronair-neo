@@ -90,8 +90,7 @@ export class NeoMqtt {
     this.connected = false
     if (!client)
       return
-    client.removeAllListeners()
-    client.end(true)
+    discardClient(client)
   }
 
   private setHealthy(next: boolean): void {
@@ -168,8 +167,7 @@ export class NeoMqtt {
     }
 
     if (this.stopped) {
-      client.removeAllListeners()
-      client.end(true)
+      discardClient(client)
       return
     }
 
@@ -208,8 +206,7 @@ export class NeoMqtt {
       }
       else {
         // Stale closure from a superseded attempt — clean it up without touching this.client.
-        client.removeAllListeners()
-        client.end(true)
+        discardClient(client)
       }
       clearTimeout(this.staleTimer)
       this.setHealthy(false)
@@ -367,4 +364,17 @@ export class NeoMqtt {
     this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS)
     this.reconnectTimer = setTimeout(() => void this.attemptConnect(), delay)
   }
+}
+
+/**
+ * Tear a client down for good. `removeAllListeners()` alone is unsafe: mqtt.js's internal
+ * `streamErrorHandler` re-emits any coded socket error (ECONNRESET, EPIPE, ...) as a client
+ * `'error'`, and that can still fire during or after `end(true)` destroys the stream. An
+ * `'error'` event with no listener is thrown by Node as an uncaught exception, which takes the
+ * whole child bridge down. A no-op sink keeps a dying socket's last words harmless.
+ */
+function discardClient(client: MqttClient): void {
+  client.removeAllListeners()
+  client.on('error', () => {})
+  client.end(true)
 }

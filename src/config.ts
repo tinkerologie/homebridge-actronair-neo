@@ -10,6 +10,14 @@ import { z } from 'zod'
  * zonesPushMaster, min/max{Heating,Cooling}Temp) is ignored silently rather than failing to
  * start — see test/config.test.ts.
  */
+/**
+ * Lowest poll interval honoured. The Neo cloud rate-limits at ~20 requests/minute, and a poll is
+ * one request before any command traffic, so anything faster only buys 429s. A lower value is
+ * clamped up (with a warning) rather than rejected: refusing to start over a too-eager interval
+ * would be a worse outcome for the user than a slightly slower refresh.
+ */
+export const MIN_REFRESH_INTERVAL_S = 10
+
 const ConfigSchema = z.looseObject({
   name: z.string().default('ActronAir Neo'),
 
@@ -31,6 +39,8 @@ const ConfigSchema = z.looseObject({
 
 export interface NeoConfig extends z.infer<typeof ConfigSchema> {
   refreshIntervalMs: number
+  /** Non-fatal adjustments made while parsing; the platform logs each at startup. */
+  warnings: string[]
 }
 
 export function parseConfig(raw: unknown): NeoConfig {
@@ -41,5 +51,16 @@ export function parseConfig(raw: unknown): NeoConfig {
       .join('; ')
     throw new Error(`Invalid plugin configuration — ${issues}`)
   }
-  return { ...parsed.data, refreshIntervalMs: parsed.data.refreshInterval * 1000 }
+  const warnings: string[] = []
+  let refreshInterval = parsed.data.refreshInterval
+  if (refreshInterval < MIN_REFRESH_INTERVAL_S) {
+    warnings.push(`refreshInterval of ${refreshInterval}s is below the ${MIN_REFRESH_INTERVAL_S}s minimum (the ActronAir cloud rate-limits faster polling); using ${MIN_REFRESH_INTERVAL_S}s.`)
+    refreshInterval = MIN_REFRESH_INTERVAL_S
+  }
+  return {
+    ...parsed.data,
+    refreshInterval,
+    refreshIntervalMs: refreshInterval * 1000,
+    warnings,
+  }
 }

@@ -196,6 +196,13 @@ describe('actronAirNeoPlatform', () => {
     expect(p.matterBindings.size).toBe(0)
   })
 
+  it('logs config warnings at startup (e.g. a clamped refreshInterval)', () => {
+    const api = makeApi()
+    // eslint-disable-next-line no-new
+    new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', refreshInterval: 2 } as never, api)
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/refreshInterval/))
+  })
+
   it('does not start when no account is linked', async () => {
     const api = makeApi()
     const p = new ActronAirNeoPlatform(log, { platform: 'ActronAirNeo', name: 'x' } as never, api)
@@ -549,7 +556,7 @@ describe('actronAirNeoPlatform', () => {
         platform: 'ActronAirNeo',
         name: 'x',
         refreshToken: 'rt',
-        refreshInterval: 1,
+        refreshInterval: 10,
       } as never,
       api,
     )
@@ -563,7 +570,7 @@ describe('actronAirNeoPlatform', () => {
     getStatus.mockClear()
     const syncSpy = vi.spyOn(p.commands, 'syncEnabledZones')
 
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(10_000)
 
     expect(getStatus).toHaveBeenCalledWith(systems._embedded['ac-system'][0].serial)
     expect(syncSpy).toHaveBeenCalled()
@@ -745,7 +752,7 @@ describe('actronAirNeoPlatform', () => {
         platform: 'ActronAirNeo',
         name: 'x',
         refreshToken: 'rt',
-        refreshInterval: 1,
+        refreshInterval: 10,
       } as never,
       api,
     )
@@ -762,7 +769,7 @@ describe('actronAirNeoPlatform', () => {
     expect(NeoMqtt).not.toHaveBeenCalled()
 
     getSystems.mockClear()
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(10_000)
     // The scheduled poll retried discovery — polling did not stop because push never started.
     expect(getSystems).toHaveBeenCalled()
   })
@@ -776,7 +783,7 @@ describe('actronAirNeoPlatform', () => {
         platform: 'ActronAirNeo',
         name: 'x',
         refreshToken: 'rt',
-        refreshInterval: 1,
+        refreshInterval: 10,
       } as never,
       api,
     )
@@ -794,12 +801,12 @@ describe('actronAirNeoPlatform', () => {
     instance.healthy = true
     instance.opts.onHealthChange(true)
 
-    // Push reports healthy — the configured 1s interval must no longer drive polling.
-    await vi.advanceTimersByTimeAsync(4000)
+    // Push reports healthy — the configured 10s interval must no longer drive polling.
+    await vi.advanceTimersByTimeAsync(40_000)
     expect(getStatus).not.toHaveBeenCalled()
 
     // Only the 5-minute safety-net cadence fires while push stays healthy.
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 4000)
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 - 40_000)
     expect(getStatus).toHaveBeenCalled()
   })
 
@@ -812,7 +819,7 @@ describe('actronAirNeoPlatform', () => {
         platform: 'ActronAirNeo',
         name: 'x',
         refreshToken: 'rt',
-        refreshInterval: 1,
+        refreshInterval: 10,
       } as never,
       api,
     )
@@ -832,7 +839,7 @@ describe('actronAirNeoPlatform', () => {
     instance.healthy = false
     instance.opts.onHealthChange(false) // push just went stale/down — narrow back now, not in 5 minutes
 
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(10_000)
     expect(getStatus).toHaveBeenCalled()
   })
 
@@ -845,7 +852,7 @@ describe('actronAirNeoPlatform', () => {
         platform: 'ActronAirNeo',
         name: 'x',
         refreshToken: 'rt',
-        refreshInterval: 1,
+        refreshInterval: 10,
       } as never,
       api,
     )
@@ -866,7 +873,7 @@ describe('actronAirNeoPlatform', () => {
       getConnectionDetails: vi.fn(),
     } as never)
 
-    await vi.advanceTimersByTimeAsync(1000) // fires the scheduled poll; it's now in flight, blocked on releaseStatus
+    await vi.advanceTimersByTimeAsync(10_000) // fires the scheduled poll; it's now in flight, blocked on releaseStatus
     expect(slowGetStatus).toHaveBeenCalledTimes(1)
 
     api.handlers.shutdown() // shutdown while that poll is still in flight
@@ -874,7 +881,7 @@ describe('actronAirNeoPlatform', () => {
     await vi.advanceTimersByTimeAsync(0) // let poll()'s .finally(() => this.startPolling()) run
 
     slowGetStatus.mockClear()
-    await vi.advanceTimersByTimeAsync(3500)
+    await vi.advanceTimersByTimeAsync(35_000)
     // startPolling() must have refused to reschedule after shutdown — no further polls.
     expect(slowGetStatus).not.toHaveBeenCalled()
   })

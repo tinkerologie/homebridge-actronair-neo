@@ -537,6 +537,33 @@ describe('neoMqtt', () => {
     expect(impl).toHaveBeenCalledTimes(1)
   })
 
+  it('a late socket error on a discarded client never throws (no listener would crash the bridge)', async () => {
+    const { impl, clients } = makeConnectImpl()
+    const mqtt = new NeoMqtt({
+      rest: buildRest() as never,
+      auth: buildAuth() as never,
+      state: new NeoState(),
+      serial: SERIAL,
+      log,
+      connectImpl: impl as never,
+    })
+
+    await mqtt.start()
+    clients[0].emit('connect')
+    await vi.advanceTimersByTimeAsync(0)
+    // A dropped connection discards the client via the failure path...
+    clients[0].emit('close')
+    const lateError = Object.assign(new Error('write ECONNRESET'), { code: 'ECONNRESET' })
+    // ...and mqtt.js's streamErrorHandler can still re-emit a coded socket error afterwards.
+    expect(() => clients[0].emit('error', lateError)).not.toThrow()
+
+    // The same must hold for a client discarded by stop().
+    await vi.advanceTimersByTimeAsync(1000)
+    const live = clients.at(-1)!
+    mqtt.stop()
+    expect(() => live.emit('error', lateError)).not.toThrow()
+  })
+
   it('resets the backoff on stop(), so a stop/start cycle does not inherit a stale 60s wait', async () => {
     const rest = buildRest()
     const { impl, clients } = makeConnectImpl()

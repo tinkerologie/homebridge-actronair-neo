@@ -123,6 +123,8 @@ export class ActronAirNeoPlatform implements DynamicPlatformPlugin {
     this.log = this.cfg.debug
       ? withDebugLogging(log)
       : log
+    for (const warning of this.cfg.warnings)
+      this.log.warn(warning)
 
     this.isMatterSupported = Boolean(
       this.api.isMatterAvailable?.() && this.api.isMatterEnabled?.() && this.api.matter,

@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Restore CI lint compatibility and enforce aggregate validation.
+- A socket error arriving after the MQTT push connection had been torn down could crash the child bridge: listeners were removed before the socket closed, and mqtt.js re-emits coded socket errors (`ECONNRESET` and the like) as `'error'` events, which Node throws when nothing is listening. Discarded clients now keep a no-op error sink.
+- Account linking in the settings page no longer trusts the ActronAir cloud's device-code response unchecked. The verification link must be `https`. A missing or too-small polling interval falls back to the RFC 8628 default of 5 seconds instead of polling the cloud in a tight loop. A response missing its code or expiry is reported as an error instead of silently "timing out".
+
+### Security
+
+- The settings-page server rejects malformed requests from the browser (non-string, empty, or containing control characters) before anything is sent to the ActronAir cloud.
+
+### Changed
+
+- `refreshInterval` now has a 10-second minimum, because the ActronAir cloud rate-limits faster polling. A lower value in an existing config is raised to 10 seconds with a startup warning, so the plugin still starts.
+- TypeScript now compiles to ES2024; every supported Node version (22, 24, 26) runs it natively.
 
 ## [1.3.2] - 2026-10-28
 
